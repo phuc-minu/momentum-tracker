@@ -258,6 +258,8 @@ def _option_chain_params() -> dict[str, str]:
     expiration = os.getenv("MARKETDATA_OPTION_EXPIRATION")
     if expiration:
         params["expiration"] = expiration
+    else:
+        params["dte"] = os.getenv("MARKETDATA_OPTION_DTE", "14")
     return params
 
 

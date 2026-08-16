@@ -129,8 +129,14 @@ def preferred_call_contract(rows: list[dict]) -> PreferredContract | None:
     if not calls:
         return None
 
+    friday_calls = [
+        row
+        for row in calls
+        if _is_friday_expiration(row.get("expiration"))
+    ]
+    ranked_calls = friday_calls or calls
     ranked = sorted(
-        calls,
+        ranked_calls,
         key=lambda row: (
             _expiration_distance(row.get("expiration")),
             abs(abs(_as_float(row.get("delta")) or 0) - 0.75),
@@ -240,6 +246,11 @@ def _parse_expiration(raw_expiration):
 def _format_expiration(raw_expiration) -> str | None:
     parsed = _parse_expiration(raw_expiration)
     return parsed.isoformat() if parsed else None
+
+
+def _is_friday_expiration(raw_expiration) -> bool:
+    parsed = _parse_expiration(raw_expiration)
+    return parsed is not None and parsed.weekday() == 4
 
 
 def _as_float(value) -> float | None:

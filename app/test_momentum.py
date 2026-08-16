@@ -149,6 +149,22 @@ def test_historical_bulk_candles_are_cached_without_provider_cached_mode(monkeyp
     assert captured["cache_ttl_seconds"] is None
 
 
+def test_option_chain_uses_dte_target_when_expiration_not_set(monkeypatch):
+    captured = {}
+    client = MarketDataClient(api_key="test-token")
+
+    async def fake_get(url, params, *, cache_ttl_seconds=300):
+        captured["params"] = params
+        return {"s": "no_data"}
+
+    monkeypatch.delenv("MARKETDATA_OPTION_EXPIRATION", raising=False)
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    asyncio.run(client.option_chain("MSFT"))
+
+    assert captured["params"]["dte"] == "14"
+
+
 def test_option_chain_accepts_column_only_payload(monkeypatch):
     client = MarketDataClient(api_key="test-token")
 
@@ -223,6 +239,34 @@ def test_preferred_contract_formats_epoch_expiration():
         ]
     )
 
+    assert activity["preferred_contract"].expiration == "2026-08-28"
+
+
+def test_preferred_contract_prefers_friday_expiration():
+    activity = analyze_options_activity(
+        [
+            {
+                "optionSymbol": "MSFT260817C00490000",
+                "expiration": "2026-08-17",
+                "strike": 490,
+                "side": "call",
+                "volume": 20000,
+                "openInterest": 10000,
+                "delta": 0.75,
+            },
+            {
+                "optionSymbol": "MSFT260828C00490000",
+                "expiration": "2026-08-28",
+                "strike": 490,
+                "side": "call",
+                "volume": 500,
+                "openInterest": 10000,
+                "delta": 0.7,
+            },
+        ]
+    )
+
+    assert activity["preferred_contract"].option_symbol == "MSFT260828C00490000"
     assert activity["preferred_contract"].expiration == "2026-08-28"
 
 
