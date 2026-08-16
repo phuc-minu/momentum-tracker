@@ -70,7 +70,7 @@ async def discover_movers(
             if candidate.return_2w >= growth_min
             and (not exclude_earnings or not candidate.likely_earnings_related)
         ]
-        filtered.sort(key=lambda item: item.momentum_score, reverse=True)
+        _sort_discovery_candidates(filtered)
         return filtered[:limit]
 
     return candidates
@@ -95,7 +95,7 @@ async def _discover_live_candidates(
         for candidate in price_candidates
         if candidate.return_2w >= growth_min
     ]
-    preliminary.sort(key=lambda item: item.momentum_score, reverse=True)
+    _sort_discovery_candidates(preliminary)
 
     enriched: list[DiscoveryCandidate] = []
     batch_size = max(limit * 2, 12)
@@ -115,7 +115,7 @@ async def _discover_live_candidates(
             if not exclude_earnings or not candidate.likely_earnings_related
         ]
         if len(filtered) >= limit:
-            filtered.sort(key=lambda item: item.momentum_score, reverse=True)
+            _sort_discovery_candidates(filtered)
             return filtered[:limit]
 
     filtered = [
@@ -123,8 +123,18 @@ async def _discover_live_candidates(
         for candidate in enriched
         if not exclude_earnings or not candidate.likely_earnings_related
     ]
-    filtered.sort(key=lambda item: item.momentum_score, reverse=True)
+    _sort_discovery_candidates(filtered)
     return filtered[:limit]
+
+
+def _sort_discovery_candidates(candidates: list[DiscoveryCandidate]) -> None:
+    candidates.sort(
+        key=lambda item: (
+            item.momentum_score,
+            item.options_confirmation_score if item.options_confirmation_score is not None else -1,
+        ),
+        reverse=True,
+    )
 
 
 async def _build_bulk_price_candidates(

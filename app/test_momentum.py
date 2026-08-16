@@ -2,11 +2,12 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from discover import _live_discovery_universe
+from discover import _live_discovery_universe, _sort_discovery_candidates
 from main import app
 from marketdata import MarketDataCache, MarketDataClient, demo_candles
 from momentum import score_symbol
 from options_activity import analyze_options_activity
+from schemas import DiscoveryCandidate
 
 
 def test_score_symbol_returns_rankable_signal():
@@ -78,6 +79,19 @@ def test_live_discovery_universe_uses_sector_universe_not_sample(monkeypatch):
     assert len(universe) > 50
 
 
+def test_discovery_sort_uses_score_then_options_confirmation():
+    candidates = [
+        _candidate("AAA", momentum_score=90, options_confirmation_score=40),
+        _candidate("BBB", momentum_score=91, options_confirmation_score=None),
+        _candidate("CCC", momentum_score=90, options_confirmation_score=88),
+        _candidate("DDD", momentum_score=90, options_confirmation_score=None),
+    ]
+
+    _sort_discovery_candidates(candidates)
+
+    assert [candidate.symbol for candidate in candidates] == ["BBB", "CCC", "AAA", "DDD"]
+
+
 def test_live_scan_without_api_key_returns_503(monkeypatch):
     monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     client = TestClient(app)
@@ -86,6 +100,26 @@ def test_live_scan_without_api_key_returns_503(monkeypatch):
 
     assert response.status_code == 503
     assert "MARKETDATA_API_KEY" in response.json()["detail"]
+
+
+def _candidate(symbol: str, *, momentum_score: float, options_confirmation_score: float | None) -> DiscoveryCandidate:
+    return DiscoveryCandidate(
+        symbol=symbol,
+        sector="Technology",
+        momentum_score=momentum_score,
+        setup="Momentum watch",
+        price_signal="momentum continuation",
+        relative_strength_percentile=50,
+        return_2w=0.1,
+        start_close=100,
+        last_close=110,
+        options_confirmation_score=options_confirmation_score,
+        options_signal="Options unavailable" if options_confirmation_score is None else "Options neutral",
+        earnings_near_move=False,
+        earnings_checked=True,
+        likely_earnings_related=False,
+        catalyst="price momentum; catalyst not identified",
+    )
 
 
 def test_marketdata_cache_round_trips_payload(tmp_path):
