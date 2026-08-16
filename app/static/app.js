@@ -438,9 +438,15 @@ function formatOptionsSignal(signal) {
 
 function formatExpiration(expiration) {
   const value = String(expiration || "");
-  if (value.startsWith("2027-01")) return "Jan 2027";
   if (!value) return "Expiration";
-  return value.slice(0, 10);
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return value.slice(0, 10);
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 async function init() {

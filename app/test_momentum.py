@@ -203,8 +203,27 @@ def test_options_confirmation_score_rewards_bullish_call_activity():
     )
 
     assert activity["put_call_ratio"] == 0.3
+    assert activity["preferred_contract"].expiration == "2026-08-28"
     assert activity["options_confirmation_score"] >= 80
     assert activity["options_signal"] == "Confirmed bullish momentum"
+
+
+def test_preferred_contract_formats_epoch_expiration():
+    activity = analyze_options_activity(
+        [
+            {
+                "optionSymbol": "PLTR260828C00170000",
+                "expiration": 1787947200,
+                "strike": 170,
+                "side": "call",
+                "volume": 3000,
+                "openInterest": 10000,
+                "delta": 0.63,
+            }
+        ]
+    )
+
+    assert activity["preferred_contract"].expiration == "2026-08-28"
 
 
 def test_options_confirmation_score_flags_speculative_call_activity():

@@ -140,7 +140,7 @@ def preferred_call_contract(rows: list[dict]) -> PreferredContract | None:
     row = ranked[0]
     return PreferredContract(
         option_symbol=str(row.get("optionSymbol") or row.get("symbol") or ""),
-        expiration=row.get("expiration"),
+        expiration=_format_expiration(row.get("expiration")),
         strike=_as_float(row.get("strike")),
         delta=_as_float(row.get("delta")),
         mid=_as_float(row.get("mid")),
@@ -235,6 +235,11 @@ def _parse_expiration(raw_expiration):
         return datetime.fromisoformat(str(raw_expiration).replace("Z", "+00:00")).date()
     except ValueError:
         return None
+
+
+def _format_expiration(raw_expiration) -> str | None:
+    parsed = _parse_expiration(raw_expiration)
+    return parsed.isoformat() if parsed else None
 
 
 def _as_float(value) -> float | None:
