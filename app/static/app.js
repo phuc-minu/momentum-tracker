@@ -136,12 +136,12 @@ function renderDiscovery(payload) {
           <td><strong>${item.momentum_score.toFixed(1)}</strong></td>
           <td><span class="sector-pill">${item.sector}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
-          <td>${item.price_signal}</td>
+          <td>${formatSignal(item.price_signal)}</td>
           <td>${formatRatio(item.volume_ratio_20d)}</td>
           <td>${formatPutCall(item.put_call_ratio, item.put_call_source)}</td>
           <td>${formatCallActivity(item)}</td>
           <td class="catalyst-cell">${item.catalyst}</td>
-          <td>${item.setup}</td>
+          <td>${formatSetup(item.setup)}</td>
           <td class="headline-cell">${formatPreferredTrade(item.preferred_contract)}</td>
         </tr>
       `;
@@ -295,21 +295,48 @@ function formatCallActivity(item) {
   if (!item.call_activity || item.call_activity === "unavailable") return "--";
   const className = item.call_activity === "unusually elevated" ? "positive" : "";
   const volume = item.call_volume ? ` ${compactNumber(item.call_volume)}` : "";
-  return `<span class="${className}">${item.call_activity}</span><span class="subtle">${volume}</span>`;
+  return `<span class="${className}">${formatActivity(item.call_activity)}</span><span class="subtle block">${volume}</span>`;
 }
 
 function formatPreferredTrade(contract) {
   if (!contract) return "--";
-  const expiration = String(contract.expiration || "").slice(0, 10) || "expiration";
+  const expiration = formatExpiration(contract.expiration);
   const delta = contract.delta === null || contract.delta === undefined ? "" : ` ~${Math.abs(contract.delta).toFixed(2)}Δ`;
-  const strike = contract.strike === null || contract.strike === undefined ? "" : ` $${contract.strike.toFixed(0)}C`;
-  return `${expiration}${strike}${delta}`;
+  const strike = contract.strike === null || contract.strike === undefined ? "" : ` $${contract.strike.toFixed(0)} C`;
+  return `${expiration}${strike}<span class="subtle block">${delta}</span>`;
 }
 
 function compactNumber(value) {
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
   if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
   return String(value);
+}
+
+function formatSignal(signal) {
+  if (signal === "new 50-day high") return "50D high";
+  if (signal === "new 20-day high") return "20D high";
+  if (signal === "momentum continuation") return "Continuation";
+  return signal || "--";
+}
+
+function formatSetup(setup) {
+  if (setup === "Momentum surge") return "Surge";
+  if (setup === "Early breakout") return "Early breakout";
+  if (setup === "Breakout watch") return "Breakout watch";
+  return setup || "--";
+}
+
+function formatActivity(activity) {
+  if (activity === "unusually elevated") return "Unusual";
+  if (activity === "elevated") return "Elevated";
+  return activity;
+}
+
+function formatExpiration(expiration) {
+  const value = String(expiration || "");
+  if (value.startsWith("2027-01")) return "Jan 2027";
+  if (!value) return "Expiration";
+  return value.slice(0, 10);
 }
 
 checkHealth();

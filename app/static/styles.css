@@ -33,7 +33,7 @@ select {
 }
 
 .shell {
-  width: min(1480px, calc(100vw - 32px));
+  width: min(1680px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 24px 0 36px;
 }
@@ -150,7 +150,9 @@ h2 {
 }
 
 .discover-controls {
-  grid-template-columns: 140px 140px 140px 190px 128px;
+  grid-template-columns: 180px 180px 180px 200px 160px;
+  gap: 16px;
+  justify-content: start;
 }
 
 .section-heading {
@@ -328,7 +330,48 @@ table {
 }
 
 .discover-table {
-  min-width: 1320px;
+  min-width: 1580px;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.discover-table .col-rank {
+  width: 54px;
+}
+
+.discover-table .col-symbol,
+.discover-table .col-score {
+  width: 76px;
+}
+
+.discover-table .col-sector {
+  width: 150px;
+}
+
+.discover-table .col-growth,
+.discover-table .col-volume,
+.discover-table .col-put-call {
+  width: 92px;
+}
+
+.discover-table .col-signal {
+  width: 120px;
+}
+
+.discover-table .col-calls {
+  width: 120px;
+}
+
+.discover-table .col-catalyst {
+  width: 190px;
+}
+
+.discover-table .col-setup {
+  width: 130px;
+}
+
+.discover-table .col-trade {
+  width: 160px;
 }
 
 th,
@@ -337,6 +380,33 @@ td {
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
   text-align: left;
+  white-space: nowrap;
+}
+
+.discover-table th,
+.discover-table td {
+  height: auto;
+  min-height: 48px;
+  overflow: hidden;
+  padding: 10px 12px;
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.discover-table th {
+  line-height: 1.2;
+}
+
+.discover-table td {
+  line-height: 1.35;
+}
+
+.discover-table td:nth-child(2),
+.discover-table td:nth-child(3),
+.discover-table td:nth-child(5),
+.discover-table td:nth-child(7),
+.discover-table td:nth-child(8) {
   white-space: nowrap;
 }
 
@@ -410,23 +480,33 @@ tbody tr.selected {
   font-weight: 800;
 }
 
+.discover-table .sector-pill {
+  max-width: 128px;
+  white-space: normal;
+}
+
 .catalyst-cell {
-  overflow: hidden;
-  max-width: 220px;
-  text-overflow: ellipsis;
+  overflow: visible;
+  max-width: none;
+  text-overflow: initial;
 }
 
 .headline-cell {
-  overflow: hidden;
-  max-width: 300px;
+  overflow: visible;
+  max-width: none;
   color: #344054;
-  text-overflow: ellipsis;
+  text-overflow: initial;
 }
 
 .subtle {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.block {
+  display: block;
+  margin-top: 2px;
 }
 
 .positive {
