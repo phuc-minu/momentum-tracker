@@ -480,6 +480,17 @@ tbody tr.selected {
   font-weight: 800;
 }
 
+.symbol-link {
+  color: var(--ink);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.symbol-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .discover-table .sector-pill {
   max-width: 128px;
   white-space: normal;

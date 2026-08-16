@@ -132,7 +132,7 @@ function renderDiscovery(payload) {
       return `
         <tr>
           <td>${index + 1}</td>
-          <td><strong>${item.symbol}</strong></td>
+          <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
           <td><strong>${item.momentum_score.toFixed(1)}</strong></td>
           <td><span class="sector-pill">${item.sector}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
@@ -310,6 +310,10 @@ function compactNumber(value) {
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
   if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
   return String(value);
+}
+
+function yahooFinanceUrl(symbol) {
+  return `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`;
 }
 
 function formatSignal(signal) {
