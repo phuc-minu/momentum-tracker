@@ -82,6 +82,16 @@ class DiscoveryCandidate(BaseModel):
     call_open_interest: int | None = None
     call_activity_ratio: float | None = None
     call_activity: Literal["unusually elevated", "elevated", "normal", "unavailable"] = "unavailable"
+    options_confirmation_score: float | None = None
+    options_signal: Literal[
+        "Confirmed bullish momentum",
+        "Options confirming",
+        "Options neutral",
+        "Speculative call activity",
+        "Options not confirming",
+        "Options weak",
+        "Options unavailable",
+    ] = "Options unavailable"
     preferred_contract: PreferredContract | None = None
     earnings_near_move: bool
     earnings_checked: bool

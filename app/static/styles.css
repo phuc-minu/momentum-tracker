@@ -354,7 +354,7 @@ table {
 }
 
 .discover-table {
-  min-width: 1580px;
+  min-width: 1700px;
   table-layout: fixed;
   font-size: 12px;
 }
@@ -384,6 +384,10 @@ table {
 
 .discover-table .col-calls {
   width: 120px;
+}
+
+.discover-table .col-options {
+  width: 128px;
 }
 
 .discover-table .col-catalyst {

@@ -143,7 +143,7 @@ async function runDiscover() {
     renderDiscovery(payload);
   } catch (error) {
     elements.discoverMeta.textContent = error.message;
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${error.message}</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${error.message}</td></tr>`;
     if (state.liveDataAvailable) renderModeNotice(`Live discovery request failed. ${error.message}`);
   } finally {
     elements.discoverButton.disabled = false;
@@ -170,7 +170,7 @@ function renderDiscovery(payload) {
   updateGrowthColumnHeader(payload.period_days);
   elements.discoverMeta.textContent = `${payload.count} movers, ${displayMode(payload.data_mode)} mode`;
   if (!payload.results.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No movers matched this filter</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">No movers matched this filter</td></tr>`;
     return;
   }
 
@@ -187,6 +187,7 @@ function renderDiscovery(payload) {
           <td>${formatRatio(item.volume_ratio_20d)}</td>
           <td>${formatPutCall(item.put_call_ratio, item.put_call_source)}</td>
           <td>${formatCallActivity(item)}</td>
+          <td>${formatOptionsConfirmation(item)}</td>
           <td class="catalyst-cell">${item.catalyst}</td>
           <td>${formatSetup(item.setup)}</td>
           <td class="headline-cell">${formatPreferredTrade(item.preferred_contract)}</td>
@@ -381,6 +382,12 @@ function formatCallActivity(item) {
   return `<span class="${className}">${formatActivity(item.call_activity)}</span><span class="subtle block">${volume}</span>`;
 }
 
+function formatOptionsConfirmation(item) {
+  if (item.options_confirmation_score === null || item.options_confirmation_score === undefined) return "--";
+  const className = item.options_confirmation_score >= 65 ? "positive" : item.options_confirmation_score < 50 ? "negative" : "";
+  return `<strong class="${className}">${item.options_confirmation_score.toFixed(0)}</strong><span class="subtle block">${formatOptionsSignal(item.options_signal)}</span>`;
+}
+
 function formatPreferredTrade(contract) {
   if (!contract) return "--";
   const expiration = formatExpiration(contract.expiration);
@@ -417,6 +424,16 @@ function formatActivity(activity) {
   if (activity === "unusually elevated") return "Unusual";
   if (activity === "elevated") return "Elevated";
   return activity;
+}
+
+function formatOptionsSignal(signal) {
+  if (signal === "Confirmed bullish momentum") return "Confirmed";
+  if (signal === "Options confirming") return "Confirming";
+  if (signal === "Options neutral") return "Neutral";
+  if (signal === "Speculative call activity") return "Speculative";
+  if (signal === "Options not confirming") return "Not confirming";
+  if (signal === "Options weak") return "Weak";
+  return "Unavailable";
 }
 
 function formatExpiration(expiration) {

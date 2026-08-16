@@ -6,6 +6,7 @@ from discover import _live_discovery_universe
 from main import app
 from marketdata import MarketDataCache, MarketDataClient, demo_candles
 from momentum import score_symbol
+from options_activity import analyze_options_activity
 
 
 def test_score_symbol_returns_rankable_signal():
@@ -62,6 +63,8 @@ def test_demo_discover_endpoint_returns_movers():
     assert payload["results"][0]["call_activity"] in {"unusually elevated", "elevated", "normal", "unavailable"}
     assert payload["results"][0]["put_call_ratio"] is not None
     assert payload["results"][0]["put_call_source"] == "demo"
+    assert payload["results"][0]["options_confirmation_score"] is not None
+    assert payload["results"][0]["options_signal"] != "Options unavailable"
     assert payload["results"][0]["preferred_contract"] is not None
 
 
@@ -170,3 +173,64 @@ def test_option_chain_accepts_column_only_payload(monkeypatch):
 
     assert rows[0]["side"] == "call"
     assert rows[0]["volume"] == 250
+
+
+def test_options_confirmation_score_rewards_bullish_call_activity():
+    activity = analyze_options_activity(
+        [
+            {
+                "optionSymbol": "AAPL260828C00300000",
+                "expiration": "2026-08-28",
+                "strike": 300,
+                "side": "call",
+                "volume": 5000,
+                "openInterest": 10000,
+                "delta": 0.65,
+                "bid": 5.0,
+                "ask": 5.4,
+                "mid": 5.2,
+            },
+            {
+                "optionSymbol": "AAPL260828P00290000",
+                "expiration": "2026-08-28",
+                "strike": 290,
+                "side": "put",
+                "volume": 1500,
+                "openInterest": 9000,
+                "delta": -0.35,
+            },
+        ]
+    )
+
+    assert activity["put_call_ratio"] == 0.3
+    assert activity["options_confirmation_score"] >= 80
+    assert activity["options_signal"] == "Confirmed bullish momentum"
+
+
+def test_options_confirmation_score_flags_speculative_call_activity():
+    activity = analyze_options_activity(
+        [
+            {
+                "optionSymbol": "XYZ260828C00100000",
+                "expiration": "2026-08-28",
+                "strike": 100,
+                "side": "call",
+                "volume": 20000,
+                "openInterest": 500,
+                "delta": 0.95,
+            },
+            {
+                "optionSymbol": "XYZ260828P00090000",
+                "expiration": "2026-08-28",
+                "strike": 90,
+                "side": "put",
+                "volume": 4000,
+                "openInterest": 800,
+                "delta": -0.2,
+            },
+        ]
+    )
+
+    assert activity["call_activity"] == "unusually elevated"
+    assert activity["options_confirmation_score"] < 80
+    assert activity["options_signal"] == "Speculative call activity"
