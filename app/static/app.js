@@ -29,13 +29,27 @@ const elements = {
   discoverButton: document.querySelector("#discoverButton"),
   discoverMeta: document.querySelector("#discoverMeta"),
   discoverBody: document.querySelector("#discoverBody"),
+  tabButtons: document.querySelectorAll(".tab-button"),
+  tabPanels: document.querySelectorAll(".tab-panel"),
 };
 
 elements.scanButton.addEventListener("click", runScan);
 elements.discoverButton.addEventListener("click", runDiscover);
+elements.tabButtons.forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.tab));
+});
 elements.symbolsInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") runScan();
 });
+
+function activateTab(tabId) {
+  elements.tabButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === tabId);
+  });
+  elements.tabPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.id === tabId);
+  });
+}
 
 async function checkHealth() {
   try {

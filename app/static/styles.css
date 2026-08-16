@@ -104,6 +104,40 @@ h2 {
   gap: 12px;
 }
 
+.tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.tab-button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tab-button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
 .controls {
   grid-template-columns: minmax(280px, 1fr) 130px 130px 110px 112px;
   align-items: end;
@@ -124,7 +158,7 @@ h2 {
   align-items: end;
   justify-content: space-between;
   gap: 16px;
-  margin: 24px 0 12px;
+  margin: 0 0 12px;
 }
 
 .section-heading span {
