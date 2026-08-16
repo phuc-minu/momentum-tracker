@@ -1,8 +1,10 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from discover import _live_discovery_universe
 from main import app
-from marketdata import demo_candles
+from marketdata import MarketDataCache, MarketDataClient, demo_candles
 from momentum import score_symbol
 
 
@@ -81,3 +83,90 @@ def test_live_scan_without_api_key_returns_503(monkeypatch):
 
     assert response.status_code == 503
     assert "MARKETDATA_API_KEY" in response.json()["detail"]
+
+
+def test_marketdata_cache_round_trips_payload(tmp_path):
+    cache = MarketDataCache(tmp_path)
+
+    cache.set("stocks:candles:AAPL", {"s": "ok", "c": [100.0]})
+
+    assert cache.get("stocks:candles:AAPL", ttl_seconds=None) == {"s": "ok", "c": [100.0]}
+
+
+def test_bulk_candles_does_not_use_provider_cached_mode(monkeypatch):
+    captured = {}
+    client = MarketDataClient(api_key="test-token")
+
+    async def fake_get(url, params, *, cache_ttl_seconds=300):
+        captured["params"] = params
+        captured["cache_ttl_seconds"] = cache_ttl_seconds
+        return {
+            "s": "ok",
+            "symbol": ["AAPL"],
+            "t": [1],
+            "o": [10],
+            "h": [11],
+            "l": [9],
+            "c": [10.5],
+            "v": [1000],
+        }
+
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    candles = asyncio.run(client.bulk_candles(["AAPL"]))
+
+    assert candles["AAPL"].close == 10.5
+    assert captured["params"] == {"symbols": "AAPL"}
+    assert captured["cache_ttl_seconds"] == 300
+
+
+def test_historical_bulk_candles_are_cached_without_provider_cached_mode(monkeypatch):
+    captured = {}
+    client = MarketDataClient(api_key="test-token")
+
+    async def fake_get(url, params, *, cache_ttl_seconds=300):
+        captured["params"] = params
+        captured["cache_ttl_seconds"] = cache_ttl_seconds
+        return {
+            "s": "ok",
+            "symbol": ["AAPL"],
+            "t": [1],
+            "o": [10],
+            "h": [11],
+            "l": [9],
+            "c": [10.5],
+            "v": [1000],
+        }
+
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    asyncio.run(client.bulk_candles(["AAPL"], date="2026-08-14"))
+
+    assert captured["params"] == {"symbols": "AAPL", "date": "2026-08-14"}
+    assert captured["cache_ttl_seconds"] is None
+
+
+def test_option_chain_accepts_column_only_payload(monkeypatch):
+    client = MarketDataClient(api_key="test-token")
+
+    async def fake_get(url, params, *, cache_ttl_seconds=300):
+        return {
+            "optionSymbol": ["AAPL270115C00100000"],
+            "symbol": ["AAPL270115C00100000"],
+            "expiration": ["2027-01-15"],
+            "strike": [100],
+            "side": ["call"],
+            "bid": [12.0],
+            "ask": [12.4],
+            "mid": [12.2],
+            "delta": [0.7],
+            "openInterest": [1000],
+            "volume": [250],
+        }
+
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    rows = asyncio.run(client.option_chain("AAPL"))
+
+    assert rows[0]["side"] == "call"
+    assert rows[0]["volume"] == 250

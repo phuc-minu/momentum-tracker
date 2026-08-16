@@ -58,6 +58,12 @@ az containerapp registry set --name $app --resource-group $ResourceGroup --serve
 
 $secretArgs = @()
 $envArgs = @()
+$discoveryOptions = if ($env:DISCOVERY_OPTIONS) { $env:DISCOVERY_OPTIONS } else { "true" }
+$marketDataProviderCache = if ($env:MARKETDATA_PROVIDER_CACHE) { $env:MARKETDATA_PROVIDER_CACHE } else { "false" }
+$marketDataOptionStrikeLimit = if ($env:MARKETDATA_OPTION_STRIKE_LIMIT) { $env:MARKETDATA_OPTION_STRIKE_LIMIT } else { "5" }
+$envArgs += "DISCOVERY_OPTIONS=$discoveryOptions"
+$envArgs += "MARKETDATA_PROVIDER_CACHE=$marketDataProviderCache"
+$envArgs += "MARKETDATA_OPTION_STRIKE_LIMIT=$marketDataOptionStrikeLimit"
 if ($env:MARKETDATA_API_KEY) {
   $marketSecretUri = "https://$vault.vault.azure.net/secrets/marketdata-api-key"
   $secretArgs += "marketdata-api-key=keyvaultref:$marketSecretUri,identityref:$identityId"

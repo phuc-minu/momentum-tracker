@@ -31,6 +31,26 @@ $env:MARKETDATA_API_KEY="YOUR_MARKETDATA_TOKEN"
 Invoke-RestMethod "http://127.0.0.1:8000/scan?symbols=NVDA,MSFT,AAPL,AVGO"
 ```
 
+## MarketData credit controls
+
+Live MarketData responses are cached on disk under `app/.cache/marketdata` by default. Historical dated bulk candles are cached without expiry; latest candle, option, news, and earnings responses use short TTLs so repeated dashboard scans do not repull the same provider data.
+
+Useful settings:
+
+```powershell
+$env:MARKETDATA_CACHE_DIR="C:\path\to\marketdata-cache"
+$env:MARKETDATA_LATEST_CACHE_SECONDS="300"
+$env:MARKETDATA_CANDLE_CACHE_SECONDS="900"
+$env:MARKETDATA_REFERENCE_CACHE_SECONDS="3600"
+$env:MARKETDATA_PROVIDER_CACHE="true"
+$env:MARKETDATA_PROVIDER_MAXAGE="5min"
+$env:MARKETDATA_OPTION_STRIKE_LIMIT="5"
+$env:DISCOVERY_OPTIONS="true"
+```
+
+`MARKETDATA_PROVIDER_CACHE=true` adds MarketData `mode=cached&maxage=5min` to option-chain requests when supported by the plan. Candle and bulk-candle endpoints use the app's local disk cache because MarketData cached mode is not available for those endpoints.
+`DISCOVERY_OPTIONS=true` enables put/call ratio, call volume, and preferred-contract enrichment in the discovery table.
+
 ## API
 
 - `GET /health` returns service and API-key configuration status

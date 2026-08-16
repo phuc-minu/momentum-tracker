@@ -30,6 +30,7 @@ const elements = {
   discoverButton: document.querySelector("#discoverButton"),
   discoverMeta: document.querySelector("#discoverMeta"),
   discoverBody: document.querySelector("#discoverBody"),
+  growthColumnHeader: document.querySelector("#growthColumnHeader"),
   tabButtons: document.querySelectorAll(".tab-button"),
   tabPanels: document.querySelectorAll(".tab-panel"),
 };
@@ -42,6 +43,7 @@ elements.tabButtons.forEach((button) => {
 elements.symbolsInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") runScan();
 });
+elements.periodInput.addEventListener("change", () => updateGrowthColumnHeader());
 
 function activateTab(tabId) {
   elements.tabButtons.forEach((button) => {
@@ -122,6 +124,7 @@ async function runScanFallback(reason) {
 }
 
 async function runDiscover() {
+  updateGrowthColumnHeader();
   const params = new URLSearchParams({
     growth_min: elements.growthInput.value,
     period_days: elements.periodInput.value,
@@ -148,6 +151,7 @@ async function runDiscover() {
 }
 
 async function runDiscoverFallback(reason) {
+  updateGrowthColumnHeader();
   const params = new URLSearchParams({
     growth_min: elements.growthInput.value,
     period_days: elements.periodInput.value,
@@ -163,6 +167,7 @@ async function runDiscoverFallback(reason) {
 }
 
 function renderDiscovery(payload) {
+  updateGrowthColumnHeader(payload.period_days);
   elements.discoverMeta.textContent = `${payload.count} movers, ${displayMode(payload.data_mode)} mode`;
   if (!payload.results.length) {
     elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No movers matched this filter</td></tr>`;
@@ -189,6 +194,17 @@ function renderDiscovery(payload) {
       `;
     })
     .join("");
+}
+
+function updateGrowthColumnHeader(periodDays = Number(elements.periodInput.value)) {
+  elements.growthColumnHeader.textContent = `${periodLabel(periodDays)} Growth`;
+}
+
+function periodLabel(periodDays) {
+  if (periodDays === 10) return "2W";
+  if (periodDays === 20) return "1M";
+  if (periodDays === 60) return "3M";
+  return `${periodDays}D`;
 }
 
 async function readJsonResponse(response) {
@@ -412,6 +428,7 @@ function formatExpiration(expiration) {
 
 async function init() {
   await checkHealth();
+  updateGrowthColumnHeader();
   runScan();
   runDiscover();
 }

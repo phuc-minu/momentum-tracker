@@ -1,7 +1,10 @@
 import hashlib
+import json
 import math
 import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -12,30 +15,72 @@ class MarketDataError(RuntimeError):
     pass
 
 
+class MarketDataCache:
+    def __init__(self, cache_dir: Path | None = None):
+        self.cache_dir = cache_dir or Path(os.getenv("MARKETDATA_CACHE_DIR", Path(__file__).parent / ".cache" / "marketdata"))
+        self.enabled = os.getenv("MARKETDATA_CACHE_DISABLED", "").strip().lower() not in {"1", "true", "yes", "on"}
+
+    def get(self, key: str, ttl_seconds: int | None) -> dict[str, Any] | None:
+        if not self.enabled:
+            return None
+
+        path = self._path(key)
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                cached = json.load(file)
+        except (OSError, ValueError):
+            return None
+
+        if ttl_seconds is not None:
+            fetched_at = float(cached.get("fetched_at", 0))
+            if datetime.now(UTC).timestamp() - fetched_at > ttl_seconds:
+                return None
+
+        payload = cached.get("payload")
+        return payload if isinstance(payload, dict) else None
+
+    def set(self, key: str, payload: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            path = self._path(key)
+            temp_path = path.with_suffix(".tmp")
+            with temp_path.open("w", encoding="utf-8") as file:
+                json.dump(
+                    {
+                        "version": 1,
+                        "fetched_at": datetime.now(UTC).timestamp(),
+                        "payload": payload,
+                    },
+                    file,
+                    separators=(",", ":"),
+                )
+            temp_path.replace(path)
+        except OSError:
+            return
+
+    def _path(self, key: str) -> Path:
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{digest}.json"
+
+
 class MarketDataClient:
-    def __init__(self, api_key: str | None = None, timeout_seconds: float = 20.0):
+    def __init__(self, api_key: str | None = None, timeout_seconds: float = 20.0, cache: MarketDataCache | None = None):
         self.api_key = api_key or os.getenv("MARKETDATA_API_KEY")
         self.timeout_seconds = timeout_seconds
+        self.cache = cache or MarketDataCache()
 
     async def candles(self, symbol: str, countback: int = 260, resolution: str = "D") -> list[Candle]:
         if not self.api_key:
             raise MarketDataError("MARKETDATA_API_KEY is required for live market data")
 
-        url = f"https://api.marketdata.app/v1/stocks/candles/{resolution}/{symbol}/"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        params = {"countback": countback}
-
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            try:
-                response = await client.get(url, headers=headers, params=params)
-                response.raise_for_status()
-            except httpx.HTTPStatusError as error:
-                raise MarketDataError(_http_error_message(error)) from error
-            except httpx.TimeoutException as error:
-                raise MarketDataError(f"MarketData request timed out for {symbol}") from error
-            except httpx.HTTPError as error:
-                raise MarketDataError(f"MarketData request failed for {symbol}: {error}") from error
-            payload = response.json()
+        payload = await self._get(
+            f"https://api.marketdata.app/v1/stocks/candles/{resolution}/{symbol}/",
+            {"countback": countback},
+            cache_ttl_seconds=_cache_ttl("MARKETDATA_CANDLE_CACHE_SECONDS", 900),
+        )
 
         status = payload.get("s")
         if status == "no_data":
@@ -64,6 +109,7 @@ class MarketDataClient:
         payload = await self._get(
             f"https://api.marketdata.app/v1/stocks/bulkcandles/{resolution}/",
             params,
+            cache_ttl_seconds=None if date else _cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
         )
         if payload.get("s") == "no_data":
             return {}
@@ -75,7 +121,11 @@ class MarketDataClient:
         if not self.api_key:
             raise MarketDataError("MARKETDATA_API_KEY is required for live earnings data")
 
-        payload = await self._get(f"https://api.marketdata.app/v1/stocks/earnings/{symbol}/", {"countback": countback})
+        payload = await self._get(
+            f"https://api.marketdata.app/v1/stocks/earnings/{symbol}/",
+            {"countback": countback},
+            cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
+        )
         if payload.get("s") == "no_data":
             return []
         if payload.get("s") != "ok":
@@ -86,7 +136,11 @@ class MarketDataClient:
         if not self.api_key:
             raise MarketDataError("MARKETDATA_API_KEY is required for live news data")
 
-        payload = await self._get(f"https://api.marketdata.app/v1/stocks/news/{symbol}/", {"countback": countback})
+        payload = await self._get(
+            f"https://api.marketdata.app/v1/stocks/news/{symbol}/",
+            {"countback": countback},
+            cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
+        )
         if payload.get("s") == "no_data":
             return []
         if payload.get("s") != "ok":
@@ -108,12 +162,14 @@ class MarketDataClient:
 
         payload = await self._get(
             f"https://api.marketdata.app/v1/options/chain/{symbol}/",
-            {"monthly": "false"},
+            _option_chain_params(),
+            cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
         )
-        if payload.get("s") == "no_data":
+        status = _payload_status(payload)
+        if status == "no_data":
             return None, "unavailable"
-        if payload.get("s") != "ok":
-            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {payload.get('s')}"))
+        if status != "ok":
+            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {status}"))
 
         rows = _unpack_columnar_payload(payload)
         volume_ratio = _put_call_ratio_from_rows(rows, "volume")
@@ -131,15 +187,22 @@ class MarketDataClient:
 
         payload = await self._get(
             f"https://api.marketdata.app/v1/options/chain/{symbol}/",
-            {"monthly": "false"},
+            _option_chain_params(),
+            cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
         )
-        if payload.get("s") == "no_data":
+        status = _payload_status(payload)
+        if status == "no_data":
             return []
-        if payload.get("s") != "ok":
-            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {payload.get('s')}"))
+        if status != "ok":
+            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {status}"))
         return _unpack_columnar_payload(payload)
 
-    async def _get(self, url: str, params: dict) -> dict:
+    async def _get(self, url: str, params: dict, *, cache_ttl_seconds: int | None = 300) -> dict:
+        cache_key = _cache_key(url, params)
+        cached_payload = self.cache.get(cache_key, cache_ttl_seconds)
+        if cached_payload is not None:
+            return cached_payload
+
         headers = {"Authorization": f"Bearer {self.api_key}"}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             try:
@@ -151,7 +214,58 @@ class MarketDataClient:
                 raise MarketDataError("MarketData request timed out") from error
             except httpx.HTTPError as error:
                 raise MarketDataError(f"MarketData request failed: {error}") from error
-            return response.json()
+            if response.status_code == 204:
+                payload = {"s": "no_data"}
+            else:
+                payload = response.json()
+
+        if isinstance(payload, dict):
+            self.cache.set(cache_key, payload)
+        return payload
+
+
+def _cache_key(url: str, params: dict) -> str:
+    normalized_params = {
+        str(key): str(value)
+        for key, value in sorted(params.items())
+    }
+    return json.dumps({"url": url, "params": normalized_params}, sort_keys=True, separators=(",", ":"))
+
+
+def _cache_ttl(name: str, default_seconds: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default_seconds
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return default_seconds
+
+
+def _provider_cached_mode_enabled() -> bool:
+    return os.getenv("MARKETDATA_PROVIDER_CACHE", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _option_chain_params() -> dict[str, str]:
+    params = {
+        "monthly": "false",
+        "strikeLimit": os.getenv("MARKETDATA_OPTION_STRIKE_LIMIT", "5"),
+        "columns": "s,optionSymbol,symbol,expiration,strike,side,bid,ask,mid,delta,openInterest,volume",
+    }
+    if _provider_cached_mode_enabled():
+        params["mode"] = "cached"
+        params["maxage"] = os.getenv("MARKETDATA_PROVIDER_MAXAGE", "5min")
+    expiration = os.getenv("MARKETDATA_OPTION_EXPIRATION")
+    if expiration:
+        params["expiration"] = expiration
+    return params
+
+
+def _payload_status(payload: dict) -> str | None:
+    status = payload.get("s")
+    if status:
+        return str(status)
+    return "ok" if any(isinstance(value, list) for value in payload.values()) else None
 
 
 def _http_error_message(error: httpx.HTTPStatusError) -> str:
@@ -164,7 +278,8 @@ def _http_error_message(error: httpx.HTTPStatusError) -> str:
         return f"MarketData rate limit reached.{suffix}"
     if status_code == 403:
         return "MarketData access is temporarily blocked. The provider allows one active device/IP per token; wait a few minutes before retrying from Azure."
-    return f"MarketData returned HTTP {status_code}"
+    suffix = f": {provider_message}" if provider_message else ""
+    return f"MarketData returned HTTP {status_code}{suffix}"
 
 
 def _provider_error_message(response: httpx.Response) -> str:
