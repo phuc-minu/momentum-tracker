@@ -180,7 +180,7 @@ function renderDiscovery(payload) {
         <tr>
           <td>${index + 1}</td>
           <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
-          <td><strong>${item.momentum_score.toFixed(1)}</strong></td>
+          <td><strong title="${escapeAttribute(scoreHint(item))}" aria-label="${escapeAttribute(scoreHint(item))}">${item.momentum_score.toFixed(1)}</strong></td>
           <td><span class="sector-pill">${item.sector}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
           <td>${formatSignal(item.price_signal)}</td>
@@ -385,7 +385,36 @@ function formatCallActivity(item) {
 function formatOptionsConfirmation(item) {
   if (item.options_confirmation_score === null || item.options_confirmation_score === undefined) return "--";
   const className = item.options_confirmation_score >= 65 ? "positive" : item.options_confirmation_score < 50 ? "negative" : "";
-  return `<strong class="${className}">${item.options_confirmation_score.toFixed(0)}</strong><span class="subtle block">${formatOptionsSignal(item.options_signal)}</span>`;
+  const hint = escapeAttribute(optionsHint(item));
+  return `<strong class="${className}" title="${hint}" aria-label="${hint}">${item.options_confirmation_score.toFixed(0)}</strong><span class="subtle block" title="${hint}">${formatOptionsSignal(item.options_signal)}</span>`;
+}
+
+function scoreHint(item) {
+  return [
+    `Momentum score ${item.momentum_score.toFixed(1)} out of 100.`,
+    "Ranks price momentum using growth, price signal, volume, and options confirmation.",
+    `Setup: ${item.setup}.`,
+    `Signal: ${formatSignal(item.price_signal)}.`,
+    `Growth: ${(item.return_2w * 100).toFixed(1)}%.`,
+  ].join(" ");
+}
+
+function optionsHint(item) {
+  const pieces = [
+    `Options confirmation score ${item.options_confirmation_score.toFixed(0)} out of 100.`,
+    `${item.options_signal}.`,
+    "Uses put/call ratio, call volume, call volume vs open interest, and preferred contract delta.",
+  ];
+  if (item.put_call_ratio !== null && item.put_call_ratio !== undefined) {
+    pieces.push(`Put/call: ${item.put_call_ratio.toFixed(2)}.`);
+  }
+  if (item.call_volume) {
+    pieces.push(`Call volume: ${compactNumber(item.call_volume)}.`);
+  }
+  if (item.call_activity_ratio !== null && item.call_activity_ratio !== undefined) {
+    pieces.push(`Call volume/OI: ${item.call_activity_ratio.toFixed(2)}x.`);
+  }
+  return pieces.join(" ");
 }
 
 function formatPreferredTrade(contract) {
@@ -447,6 +476,14 @@ function formatExpiration(expiration) {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+function escapeAttribute(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 async function init() {
