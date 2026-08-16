@@ -31,6 +31,15 @@ def test_demo_scan_endpoint_ranks_results():
     assert scores == sorted(scores, reverse=True)
 
 
+def test_dashboard_served_at_root():
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Momentum Tracker" in response.text
+
+
 def test_live_scan_without_api_key_returns_503(monkeypatch):
     monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     client = TestClient(app)

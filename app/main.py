@@ -1,7 +1,10 @@
 import asyncio
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from marketdata import MarketDataClient, MarketDataError, demo_candles
 from momentum import score_symbol
@@ -9,6 +12,9 @@ from schemas import ScanRequest, ScanResponse
 from universe import configured_universe, dedupe_symbols, parse_symbols
 
 app = FastAPI(title="Tech Momentum AI", version="0.1.0")
+STATIC_DIR = Path(__file__).parent / "static"
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/health")
@@ -22,11 +28,7 @@ def health():
 
 @app.get("/")
 def root():
-    return {
-        "service": "Tech Momentum AI",
-        "version": "0.1.0",
-        "endpoints": ["/health", "/universe", "/scan"],
-    }
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/universe")

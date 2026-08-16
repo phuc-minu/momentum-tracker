@@ -5,9 +5,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-if (-not $env:MARKETDATA_API_KEY) { throw "Set MARKETDATA_API_KEY in this terminal first." }
-if (-not $env:OPENAI_API_KEY) { throw "Set OPENAI_API_KEY in this terminal first." }
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+$env:AZURE_CORE_NO_COLOR = "true"
 
 az account show --output none
 az provider register --namespace Microsoft.App --wait
@@ -42,26 +42,46 @@ az role assignment create `
 Write-Host "Waiting for Key Vault RBAC propagation..."
 Start-Sleep -Seconds 30
 
-az keyvault secret set --vault-name $vault --name marketdata-api-key --value $env:MARKETDATA_API_KEY --output none
-az keyvault secret set --vault-name $vault --name openai-api-key --value $env:OPENAI_API_KEY --output none
+if ($env:MARKETDATA_API_KEY) {
+  az keyvault secret set --vault-name $vault --name marketdata-api-key --value $env:MARKETDATA_API_KEY --output none
+}
+
+if ($env:OPENAI_API_KEY) {
+  az keyvault secret set --vault-name $vault --name openai-api-key --value $env:OPENAI_API_KEY --output none
+}
 
 az acr build --registry $acr --image tech-momentum-ai:latest ./app
 
 $acrLogin = az acr show --name $acr --query loginServer -o tsv
 az containerapp registry set --name $app --resource-group $ResourceGroup --server $acrLogin --identity $identityId --output none
 
-$marketSecretUri = "https://$vault.vault.azure.net/secrets/marketdata-api-key"
-$openaiSecretUri = "https://$vault.vault.azure.net/secrets/openai-api-key"
-az containerapp secret set --name $app --resource-group $ResourceGroup --secrets `
-  "marketdata-api-key=keyvaultref:$marketSecretUri,identityref:$identityId" `
-  "openai-api-key=keyvaultref:$openaiSecretUri,identityref:$identityId" --output none
+$secretArgs = @()
+$envArgs = @()
+if ($env:MARKETDATA_API_KEY) {
+  $marketSecretUri = "https://$vault.vault.azure.net/secrets/marketdata-api-key"
+  $secretArgs += "marketdata-api-key=keyvaultref:$marketSecretUri,identityref:$identityId"
+  $envArgs += "MARKETDATA_API_KEY=secretref:marketdata-api-key"
+}
+if ($env:OPENAI_API_KEY) {
+  $openaiSecretUri = "https://$vault.vault.azure.net/secrets/openai-api-key"
+  $secretArgs += "openai-api-key=keyvaultref:$openaiSecretUri,identityref:$identityId"
+  $envArgs += "OPENAI_API_KEY=secretref:openai-api-key"
+}
 
-Write-Host "Waiting for container app identity access to Key Vault..."
-Start-Sleep -Seconds 30
+if ($secretArgs.Count -gt 0) {
+  az containerapp secret set --name $app --resource-group $ResourceGroup --secrets $secretArgs --output none
+  Write-Host "Waiting for container app identity access to Key Vault..."
+  Start-Sleep -Seconds 30
+}
 
-az containerapp update --name $app --resource-group $ResourceGroup `
-  --image "$acrLogin/tech-momentum-ai:latest" `
-  --set-env-vars "MARKETDATA_API_KEY=secretref:marketdata-api-key" "OPENAI_API_KEY=secretref:openai-api-key" --output none
+if ($envArgs.Count -gt 0) {
+  az containerapp update --name $app --resource-group $ResourceGroup `
+    --image "$acrLogin/tech-momentum-ai:latest" `
+    --set-env-vars $envArgs --output none
+} else {
+  az containerapp update --name $app --resource-group $ResourceGroup `
+    --image "$acrLogin/tech-momentum-ai:latest" --output none
+}
 
 $fqdn = az containerapp show --name $app --resource-group $ResourceGroup --query properties.configuration.ingress.fqdn -o tsv
 Write-Host "Deployed: https://$fqdn"
