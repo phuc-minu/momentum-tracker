@@ -137,6 +137,7 @@ function renderDiscovery(payload) {
           <td><strong>${item.symbol}</strong></td>
           <td><span class="sector-pill">${item.sector}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
+          <td>${formatPutCall(item.put_call_ratio, item.put_call_source)}</td>
           <td>$${item.last_close.toFixed(2)}</td>
           <td>${item.likely_earnings_related ? "Flagged" : "Clear"}</td>
           <td class="catalyst-cell">${item.catalyst}</td>
@@ -276,6 +277,13 @@ function formatRatio(value) {
   if (value === null || value === undefined) return "--";
   const className = value >= 1 ? "positive" : "negative";
   return `<span class="${className}">${value.toFixed(2)}x</span>`;
+}
+
+function formatPutCall(value, source) {
+  if (value === null || value === undefined) return "--";
+  const className = value <= 0.7 ? "positive" : value >= 1.2 ? "negative" : "";
+  const label = source === "open_interest" ? "OI" : source === "demo" ? "demo" : "vol";
+  return `<span class="${className}">${value.toFixed(2)}</span> <span class="subtle">${label}</span>`;
 }
 
 checkHealth();

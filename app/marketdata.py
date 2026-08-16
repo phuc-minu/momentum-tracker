@@ -70,6 +70,29 @@ class MarketDataClient:
             if row.get("headline")
         ]
 
+    async def put_call_ratio(self, symbol: str) -> tuple[float | None, str]:
+        if not self.api_key:
+            raise MarketDataError("MARKETDATA_API_KEY is required for live options data")
+
+        payload = await self._get(
+            f"https://api.marketdata.app/v1/options/chain/{symbol}/",
+            {"monthly": "false"},
+        )
+        if payload.get("s") == "no_data":
+            return None, "unavailable"
+        if payload.get("s") != "ok":
+            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {payload.get('s')}"))
+
+        rows = _unpack_columnar_payload(payload)
+        volume_ratio = _put_call_ratio_from_rows(rows, "volume")
+        if volume_ratio is not None:
+            return volume_ratio, "volume"
+
+        open_interest_ratio = _put_call_ratio_from_rows(rows, "openInterest")
+        if open_interest_ratio is not None:
+            return open_interest_ratio, "open_interest"
+        return None, "unavailable"
+
     async def _get(self, url: str, params: dict) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
@@ -119,6 +142,23 @@ def _unpack_columnar_payload(payload: dict) -> list[dict]:
             }
         )
     return rows
+
+
+def _put_call_ratio_from_rows(rows: list[dict], metric: str) -> float | None:
+    put_total = 0.0
+    call_total = 0.0
+    for row in rows:
+        value = row.get(metric)
+        if value in (None, ""):
+            continue
+        side = str(row.get("side", "")).lower()
+        if side == "put":
+            put_total += float(value)
+        elif side == "call":
+            call_total += float(value)
+    if call_total <= 0:
+        return None
+    return round(put_total / call_total, 2)
 
 
 def demo_candles(symbol: str, countback: int = 260) -> list[Candle]:

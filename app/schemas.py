@@ -61,6 +61,8 @@ class DiscoveryCandidate(BaseModel):
     return_2w: float
     start_close: float
     last_close: float
+    put_call_ratio: float | None = None
+    put_call_source: Literal["volume", "open_interest", "demo", "unavailable"] = "unavailable"
     earnings_near_move: bool
     earnings_checked: bool
     likely_earnings_related: bool

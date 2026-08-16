@@ -423,6 +423,12 @@ tbody tr.selected {
   text-overflow: ellipsis;
 }
 
+.subtle {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .positive {
   color: var(--gain);
   font-weight: 800;

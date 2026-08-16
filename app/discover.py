@@ -38,6 +38,8 @@ async def discover_movers(
                 sector,
                 demo_discovery_candles(symbol, max(period_days + 2, 40), period_days),
                 None,
+                put_call_ratio=demo_put_call_ratio(symbol),
+                put_call_source="demo",
                 period_days=period_days,
                 demo=True,
             )
@@ -72,11 +74,22 @@ async def _build_live_candidate(
     candles = await client.candles(symbol, countback=max(period_days + 5, 30))
     if not candles:
         return None
-    earnings, news = await asyncio.gather(
+    earnings, news, options_sentiment = await asyncio.gather(
         _safe_earnings(client, symbol),
         _safe_news(client, symbol),
+        _safe_put_call_ratio(client, symbol),
     )
-    return await _build_candidate(symbol, sector, candles, news, earnings=earnings, period_days=period_days)
+    put_call_ratio, put_call_source = options_sentiment
+    return await _build_candidate(
+        symbol,
+        sector,
+        candles,
+        news,
+        earnings=earnings,
+        put_call_ratio=put_call_ratio,
+        put_call_source=put_call_source,
+        period_days=period_days,
+    )
 
 
 async def _build_candidate(
@@ -86,6 +99,8 @@ async def _build_candidate(
     news: list[NewsItem] | None,
     *,
     earnings: list[dict] | None = None,
+    put_call_ratio: float | None = None,
+    put_call_source: str = "unavailable",
     period_days: int = 10,
     demo: bool = False,
 ) -> DiscoveryCandidate | None:
@@ -110,6 +125,8 @@ async def _build_candidate(
         return_2w=round(return_2w, 4),
         start_close=round(start.close, 2),
         last_close=round(last.close, 2),
+        put_call_ratio=put_call_ratio,
+        put_call_source=put_call_source,
         earnings_near_move=earnings_near_move,
         earnings_checked=earnings is not None,
         likely_earnings_related=likely_earnings_related,
@@ -130,6 +147,13 @@ async def _safe_news(client: MarketDataClient, symbol: str) -> list[NewsItem]:
         return await client.news(symbol, countback=5)
     except Exception:
         return []
+
+
+async def _safe_put_call_ratio(client: MarketDataClient, symbol: str) -> tuple[float | None, str]:
+    try:
+        return await client.put_call_ratio(symbol)
+    except Exception:
+        return None, "unavailable"
 
 
 def _earnings_near_move(earnings: list[dict], start_timestamp: int, end_timestamp: int) -> bool:
@@ -209,3 +233,8 @@ def demo_discovery_candles(symbol: str, countback: int, period_days: int) -> lis
             )
         )
     return boosted
+
+
+def demo_put_call_ratio(symbol: str) -> float:
+    seed = int(hashlib.sha256(symbol.encode("utf-8")).hexdigest()[:8], 16)
+    return round(0.45 + (seed % 130) / 100, 2)
