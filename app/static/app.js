@@ -115,7 +115,7 @@ async function runDiscover() {
     renderDiscovery(payload);
   } catch (error) {
     elements.discoverMeta.textContent = error.message;
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="8">${error.message}</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${error.message}</td></tr>`;
   } finally {
     elements.discoverButton.disabled = false;
   }
@@ -124,24 +124,26 @@ async function runDiscover() {
 function renderDiscovery(payload) {
   elements.discoverMeta.textContent = `${payload.count} movers, ${payload.data_mode} mode`;
   if (!payload.results.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="8">No movers matched this filter</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No movers matched this filter</td></tr>`;
     return;
   }
 
   elements.discoverBody.innerHTML = payload.results
     .map((item, index) => {
-      const headline = item.headlines[0]?.headline || "--";
       return `
         <tr>
           <td>${index + 1}</td>
           <td><strong>${item.symbol}</strong></td>
+          <td><strong>${item.momentum_score.toFixed(1)}</strong></td>
           <td><span class="sector-pill">${item.sector}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
+          <td>${item.price_signal}</td>
+          <td>${formatRatio(item.volume_ratio_20d)}</td>
           <td>${formatPutCall(item.put_call_ratio, item.put_call_source)}</td>
-          <td>$${item.last_close.toFixed(2)}</td>
-          <td>${item.likely_earnings_related ? "Flagged" : "Clear"}</td>
+          <td>${formatCallActivity(item)}</td>
           <td class="catalyst-cell">${item.catalyst}</td>
-          <td class="headline-cell">${headline}</td>
+          <td>${item.setup}</td>
+          <td class="headline-cell">${formatPreferredTrade(item.preferred_contract)}</td>
         </tr>
       `;
     })
@@ -284,6 +286,27 @@ function formatPutCall(value, source) {
   const className = value <= 0.7 ? "positive" : value >= 1.2 ? "negative" : "";
   const label = source === "open_interest" ? "OI" : source === "demo" ? "demo" : "vol";
   return `<span class="${className}">${value.toFixed(2)}</span> <span class="subtle">${label}</span>`;
+}
+
+function formatCallActivity(item) {
+  if (!item.call_activity || item.call_activity === "unavailable") return "--";
+  const className = item.call_activity === "unusually elevated" ? "positive" : "";
+  const volume = item.call_volume ? ` ${compactNumber(item.call_volume)}` : "";
+  return `<span class="${className}">${item.call_activity}</span><span class="subtle">${volume}</span>`;
+}
+
+function formatPreferredTrade(contract) {
+  if (!contract) return "--";
+  const expiration = String(contract.expiration || "").slice(0, 10) || "expiration";
+  const delta = contract.delta === null || contract.delta === undefined ? "" : ` ~${Math.abs(contract.delta).toFixed(2)}Δ`;
+  const strike = contract.strike === null || contract.strike === undefined ? "" : ` $${contract.strike.toFixed(0)}C`;
+  return `${expiration}${strike}${delta}`;
+}
+
+function compactNumber(value) {
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
+  return String(value);
 }
 
 checkHealth();

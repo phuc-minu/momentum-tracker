@@ -93,6 +93,20 @@ class MarketDataClient:
             return open_interest_ratio, "open_interest"
         return None, "unavailable"
 
+    async def option_chain(self, symbol: str) -> list[dict]:
+        if not self.api_key:
+            raise MarketDataError("MARKETDATA_API_KEY is required for live options data")
+
+        payload = await self._get(
+            f"https://api.marketdata.app/v1/options/chain/{symbol}/",
+            {"monthly": "false"},
+        )
+        if payload.get("s") == "no_data":
+            return []
+        if payload.get("s") != "ok":
+            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {payload.get('s')}"))
+        return _unpack_columnar_payload(payload)
+
     async def _get(self, url: str, params: dict) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:

@@ -55,14 +55,34 @@ class NewsItem(BaseModel):
     publication_date: str | int | None = None
 
 
+class PreferredContract(BaseModel):
+    option_symbol: str
+    expiration: str | int | None = None
+    strike: float | None = None
+    delta: float | None = None
+    mid: float | None = None
+    bid: float | None = None
+    ask: float | None = None
+
+
 class DiscoveryCandidate(BaseModel):
     symbol: str
     sector: str
+    momentum_score: float
+    setup: str
+    price_signal: str
+    relative_strength_percentile: float
+    volume_ratio_20d: float | None = None
     return_2w: float
     start_close: float
     last_close: float
     put_call_ratio: float | None = None
     put_call_source: Literal["volume", "open_interest", "demo", "unavailable"] = "unavailable"
+    call_volume: int | None = None
+    call_open_interest: int | None = None
+    call_activity_ratio: float | None = None
+    call_activity: Literal["unusually elevated", "elevated", "normal", "unavailable"] = "unavailable"
+    preferred_contract: PreferredContract | None = None
     earnings_near_move: bool
     earnings_checked: bool
     likely_earnings_related: bool

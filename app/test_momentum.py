@@ -53,8 +53,12 @@ def test_demo_discover_endpoint_returns_movers():
     assert payload["count"] <= 10
     assert payload["results"][0]["return_2w"] >= 0.20
     assert payload["results"][0]["likely_earnings_related"] is False
+    assert payload["results"][0]["momentum_score"] >= 0
+    assert payload["results"][0]["setup"]
+    assert payload["results"][0]["call_activity"] in {"unusually elevated", "elevated", "normal", "unavailable"}
     assert payload["results"][0]["put_call_ratio"] is not None
     assert payload["results"][0]["put_call_source"] == "demo"
+    assert payload["results"][0]["preferred_contract"] is not None
 
 
 def test_live_scan_without_api_key_returns_503(monkeypatch):
