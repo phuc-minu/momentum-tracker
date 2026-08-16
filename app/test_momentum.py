@@ -39,6 +39,7 @@ def test_dashboard_served_at_root():
     assert response.status_code == 200
     assert "Stock Momentum AI" in response.text
     assert "2-Week Non-Earnings Movers" in response.text
+    assert "Demo" not in response.text
 
 
 def test_demo_discover_endpoint_returns_movers():

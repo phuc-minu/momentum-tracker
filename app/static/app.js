@@ -9,7 +9,6 @@ const elements = {
   symbolsInput: document.querySelector("#symbolsInput"),
   benchmarkInput: document.querySelector("#benchmarkInput"),
   countbackInput: document.querySelector("#countbackInput"),
-  demoToggle: document.querySelector("#demoToggle"),
   scanButton: document.querySelector("#scanButton"),
   leaderCount: document.querySelector("#leaderCount"),
   averageScore: document.querySelector("#averageScore"),
@@ -56,7 +55,7 @@ async function checkHealth() {
     const response = await fetch("/health");
     const payload = await response.json();
     elements.apiStatus.className = "status-dot ok";
-    elements.apiStatusText.textContent = payload.marketdata_configured ? "Live ready" : "Demo ready";
+    elements.apiStatusText.textContent = payload.marketdata_configured ? "Live ready" : "Beta ready";
   } catch {
     elements.apiStatus.className = "status-dot bad";
     elements.apiStatusText.textContent = "Offline";
@@ -68,7 +67,7 @@ async function runScan() {
     symbols: elements.symbolsInput.value,
     benchmark: elements.benchmarkInput.value || "QQQ",
     countback: elements.countbackInput.value,
-    demo: elements.demoToggle.checked ? "true" : "false",
+    demo: "true",
   });
 
   elements.scanButton.disabled = true;
@@ -102,7 +101,7 @@ async function runDiscover() {
     period_days: elements.periodInput.value,
     limit: elements.limitInput.value,
     exclude_earnings: elements.excludeEarningsToggle.checked ? "true" : "false",
-    demo: elements.demoToggle.checked ? "true" : "false",
+    demo: "true",
   });
 
   elements.discoverButton.disabled = true;
@@ -122,7 +121,7 @@ async function runDiscover() {
 }
 
 function renderDiscovery(payload) {
-  elements.discoverMeta.textContent = `${payload.count} movers, ${payload.data_mode} mode`;
+  elements.discoverMeta.textContent = `${payload.count} movers, ${displayMode(payload.data_mode)} mode`;
   if (!payload.results.length) {
     elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No movers matched this filter</td></tr>`;
     return;
@@ -157,7 +156,7 @@ function renderSummary(payload) {
   elements.leaderCount.textContent = String(payload.count);
   elements.averageScore.textContent = payload.results.length ? average.toFixed(1) : "--";
   elements.topSetup.textContent = payload.results[0]?.setup || "--";
-  elements.dataMode.textContent = payload.data_mode;
+  elements.dataMode.textContent = displayMode(payload.data_mode);
   elements.scanMeta.textContent = `${payload.count} symbols vs ${payload.benchmark}`;
 }
 
@@ -284,8 +283,12 @@ function formatRatio(value) {
 function formatPutCall(value, source) {
   if (value === null || value === undefined) return "--";
   const className = value <= 0.7 ? "positive" : value >= 1.2 ? "negative" : "";
-  const label = source === "open_interest" ? "OI" : source === "demo" ? "demo" : "vol";
+  const label = source === "open_interest" ? "OI" : source === "demo" ? "beta" : "vol";
   return `<span class="${className}">${value.toFixed(2)}</span> <span class="subtle">${label}</span>`;
+}
+
+function displayMode(mode) {
+  return mode === "demo" ? "beta" : mode;
 }
 
 function formatCallActivity(item) {
