@@ -22,9 +22,17 @@ const elements = {
   factorGrid: document.querySelector("#factorGrid"),
   notesList: document.querySelector("#notesList"),
   scoreCanvas: document.querySelector("#scoreCanvas"),
+  growthInput: document.querySelector("#growthInput"),
+  periodInput: document.querySelector("#periodInput"),
+  limitInput: document.querySelector("#limitInput"),
+  excludeEarningsToggle: document.querySelector("#excludeEarningsToggle"),
+  discoverButton: document.querySelector("#discoverButton"),
+  discoverMeta: document.querySelector("#discoverMeta"),
+  discoverBody: document.querySelector("#discoverBody"),
 };
 
 elements.scanButton.addEventListener("click", runScan);
+elements.discoverButton.addEventListener("click", runDiscover);
 elements.symbolsInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") runScan();
 });
@@ -72,6 +80,57 @@ async function runScan() {
   } finally {
     elements.scanButton.disabled = false;
   }
+}
+
+async function runDiscover() {
+  const params = new URLSearchParams({
+    growth_min: elements.growthInput.value,
+    period_days: elements.periodInput.value,
+    limit: elements.limitInput.value,
+    exclude_earnings: elements.excludeEarningsToggle.checked ? "true" : "false",
+    demo: elements.demoToggle.checked ? "true" : "false",
+  });
+
+  elements.discoverButton.disabled = true;
+  elements.discoverMeta.textContent = "Discovering";
+
+  try {
+    const response = await fetch(`/discover?${params.toString()}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "Discovery failed");
+    renderDiscovery(payload);
+  } catch (error) {
+    elements.discoverMeta.textContent = error.message;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="8">${error.message}</td></tr>`;
+  } finally {
+    elements.discoverButton.disabled = false;
+  }
+}
+
+function renderDiscovery(payload) {
+  elements.discoverMeta.textContent = `${payload.count} movers, ${payload.data_mode} mode`;
+  if (!payload.results.length) {
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="8">No movers matched this filter</td></tr>`;
+    return;
+  }
+
+  elements.discoverBody.innerHTML = payload.results
+    .map((item, index) => {
+      const headline = item.headlines[0]?.headline || "--";
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${item.symbol}</strong></td>
+          <td><span class="sector-pill">${item.sector}</span></td>
+          <td>${formatPercent(item.return_2w)}</td>
+          <td>$${item.last_close.toFixed(2)}</td>
+          <td>${item.likely_earnings_related ? "Flagged" : "Clear"}</td>
+          <td class="catalyst-cell">${item.catalyst}</td>
+          <td class="headline-cell">${headline}</td>
+        </tr>
+      `;
+    })
+    .join("");
 }
 
 function renderSummary(payload) {
@@ -207,3 +266,4 @@ function formatRatio(value) {
 
 checkHealth();
 runScan();
+runDiscover();

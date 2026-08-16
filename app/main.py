@@ -6,9 +6,10 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from discover import discover_movers
 from marketdata import MarketDataClient, MarketDataError, demo_candles
 from momentum import score_symbol
-from schemas import ScanRequest, ScanResponse
+from schemas import DiscoveryResponse, ScanRequest, ScanResponse
 from universe import configured_universe, dedupe_symbols, parse_symbols
 
 app = FastAPI(title="Tech Momentum AI", version="0.1.0")
@@ -50,6 +51,36 @@ async def scan(
         demo=demo,
     )
     return await run_scan(request)
+
+
+@app.get("/discover", response_model=DiscoveryResponse)
+async def discover(
+    growth_min: float = Query(default=0.20, ge=0, le=5),
+    period_days: int = Query(default=10, ge=5, le=60),
+    limit: int = Query(default=10, ge=1, le=50),
+    exclude_earnings: bool = Query(default=True),
+    demo: bool = Query(default=False),
+):
+    try:
+        results = await discover_movers(
+            growth_min=growth_min,
+            period_days=period_days,
+            limit=limit,
+            exclude_earnings=exclude_earnings,
+            demo=demo,
+        )
+    except MarketDataError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+    return DiscoveryResponse(
+        count=len(results),
+        limit=limit,
+        growth_min=growth_min,
+        period_days=period_days,
+        exclude_earnings=exclude_earnings,
+        data_mode="demo" if demo else "live",
+        results=results,
+    )
 
 
 @app.post("/scan", response_model=ScanResponse)

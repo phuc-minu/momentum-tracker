@@ -50,7 +50,7 @@ if ($env:OPENAI_API_KEY) {
   az keyvault secret set --vault-name $vault --name openai-api-key --value $env:OPENAI_API_KEY --output none
 }
 
-az acr build --registry $acr --image tech-momentum-ai:latest ./app
+az acr build --registry $acr --image tech-momentum-ai:latest --no-logs ./app
 
 $acrLogin = az acr show --name $acr --query loginServer -o tsv
 az containerapp registry set --name $app --resource-group $ResourceGroup --server $acrLogin --identity $identityId --output none

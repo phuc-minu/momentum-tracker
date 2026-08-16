@@ -47,3 +47,32 @@ class ScanResponse(BaseModel):
     count: int
     results: list[MomentumSignal]
     data_mode: Literal["live", "demo"]
+
+
+class NewsItem(BaseModel):
+    headline: str
+    source: str | None = None
+    publication_date: str | int | None = None
+
+
+class DiscoveryCandidate(BaseModel):
+    symbol: str
+    sector: str
+    return_2w: float
+    start_close: float
+    last_close: float
+    earnings_near_move: bool
+    earnings_checked: bool
+    likely_earnings_related: bool
+    catalyst: str
+    headlines: list[NewsItem] = Field(default_factory=list)
+
+
+class DiscoveryResponse(BaseModel):
+    count: int
+    limit: int
+    growth_min: float
+    period_days: int
+    exclude_earnings: bool
+    data_mode: Literal["live", "demo"]
+    results: list[DiscoveryCandidate]

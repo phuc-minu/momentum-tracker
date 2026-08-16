@@ -102,6 +102,72 @@
           <ul id="notesList" class="notes"></ul>
         </aside>
       </section>
+
+      <section class="discover-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Discovery</p>
+            <h2>2-Week Non-Earnings Movers</h2>
+          </div>
+          <span id="discoverMeta">Ready</span>
+        </div>
+
+        <section class="controls discover-controls" aria-label="Discovery controls">
+          <label class="field">
+            <span>Min Growth</span>
+            <select id="growthInput">
+              <option value="0.15">15%</option>
+              <option value="0.20" selected>20%</option>
+              <option value="0.30">30%</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Period</span>
+            <select id="periodInput">
+              <option value="10" selected>2 weeks</option>
+              <option value="20">1 month</option>
+              <option value="60">3 months</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Limit</span>
+            <select id="limitInput">
+              <option value="10" selected>Top 10</option>
+              <option value="25">Top 25</option>
+              <option value="50">Top 50</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input id="excludeEarningsToggle" type="checkbox" checked />
+            <span></span>
+            <strong>Exclude Earnings</strong>
+          </label>
+          <button id="discoverButton" class="primary-button" type="button">
+            <span class="button-icon">↻</span>
+            <span>Discover</span>
+          </button>
+        </section>
+
+        <div class="table-panel">
+          <div class="table-wrap">
+            <table class="discover-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Symbol</th>
+                  <th>Sector</th>
+                  <th>2W Growth</th>
+                  <th>Close</th>
+                  <th>Earnings</th>
+                  <th>Catalyst</th>
+                  <th>Headline</th>
+                </tr>
+              </thead>
+              <tbody id="discoverBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
 
     <script src="/static/app.js"></script>

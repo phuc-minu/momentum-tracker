@@ -38,6 +38,21 @@ def test_dashboard_served_at_root():
 
     assert response.status_code == 200
     assert "Momentum Tracker" in response.text
+    assert "2-Week Non-Earnings Movers" in response.text
+
+
+def test_demo_discover_endpoint_returns_movers():
+    client = TestClient(app)
+
+    response = client.get("/discover", params={"demo": "true", "growth_min": "0.20", "limit": "10"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data_mode"] == "demo"
+    assert payload["count"] > 0
+    assert payload["count"] <= 10
+    assert payload["results"][0]["return_2w"] >= 0.20
+    assert payload["results"][0]["likely_earnings_related"] is False
 
 
 def test_live_scan_without_api_key_returns_503(monkeypatch):

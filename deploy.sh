@@ -29,7 +29,7 @@ if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   az keyvault secret set --vault-name "$vault" --name openai-api-key --value "$OPENAI_API_KEY" >/dev/null
 fi
 
-az acr build --registry "$acr" --image tech-momentum-ai:latest ./app
+az acr build --registry "$acr" --image tech-momentum-ai:latest --no-logs ./app
 acr_login=$(az acr show -n "$acr" --query loginServer -o tsv)
 az containerapp registry set -n "$app" -g "$RESOURCE_GROUP" --server "$acr_login" --identity "$identity_id" >/dev/null
 

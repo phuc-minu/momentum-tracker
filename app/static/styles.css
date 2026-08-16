@@ -115,6 +115,23 @@ h2 {
   box-shadow: var(--shadow);
 }
 
+.discover-controls {
+  grid-template-columns: 140px 140px 140px 190px 128px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 24px 0 12px;
+}
+
+.section-heading span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .field {
   display: grid;
   gap: 7px;
@@ -276,6 +293,10 @@ table {
   min-width: 820px;
 }
 
+.discover-table {
+  min-width: 1040px;
+}
+
 th,
 td {
   height: 54px;
@@ -341,6 +362,31 @@ tbody tr.selected {
   background: #edf2f7;
   color: var(--ink);
   text-transform: capitalize;
+}
+
+.sector-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.catalyst-cell {
+  overflow: hidden;
+  max-width: 220px;
+  text-overflow: ellipsis;
+}
+
+.headline-cell {
+  overflow: hidden;
+  max-width: 300px;
+  color: #344054;
+  text-overflow: ellipsis;
 }
 
 .positive {
@@ -420,6 +466,7 @@ tbody tr.selected {
 
 @media (max-width: 1040px) {
   .controls,
+  .discover-controls,
   .metrics,
   .workspace {
     grid-template-columns: 1fr;
