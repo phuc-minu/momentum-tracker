@@ -12,7 +12,7 @@ from momentum import score_symbol
 from schemas import DiscoveryResponse, ScanRequest, ScanResponse
 from universe import configured_universe, dedupe_symbols, parse_symbols
 
-app = FastAPI(title="Tech Momentum AI", version="0.1.0")
+app = FastAPI(title="Stock Momentum AI", version="0.1.0")
 STATIC_DIR = Path(__file__).parent / "static"
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

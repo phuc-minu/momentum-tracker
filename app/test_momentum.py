@@ -37,7 +37,7 @@ def test_dashboard_served_at_root():
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Momentum Tracker" in response.text
+    assert "Stock Momentum AI" in response.text
     assert "2-Week Non-Earnings Movers" in response.text
 
 

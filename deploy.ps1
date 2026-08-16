@@ -29,6 +29,7 @@ $identityId = $deploy.identityId.value
 $app = $deploy.containerAppName.value
 $subscriptionId = az account show --query id -o tsv
 $vaultId = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.KeyVault/vaults/$vault"
+$imageTag = Get-Date -Format "yyyyMMddHHmmss"
 
 Write-Host "Granting current Azure user permission to write Key Vault secrets..."
 $signedInUserId = az ad signed-in-user show --query id -o tsv
@@ -50,7 +51,7 @@ if ($env:OPENAI_API_KEY) {
   az keyvault secret set --vault-name $vault --name openai-api-key --value $env:OPENAI_API_KEY --output none
 }
 
-az acr build --registry $acr --image tech-momentum-ai:latest --no-logs ./app
+az acr build --registry $acr --image "tech-momentum-ai:$imageTag" --no-logs ./app
 
 $acrLogin = az acr show --name $acr --query loginServer -o tsv
 az containerapp registry set --name $app --resource-group $ResourceGroup --server $acrLogin --identity $identityId --output none
@@ -76,11 +77,11 @@ if ($secretArgs.Count -gt 0) {
 
 if ($envArgs.Count -gt 0) {
   az containerapp update --name $app --resource-group $ResourceGroup `
-    --image "$acrLogin/tech-momentum-ai:latest" `
+    --image "$acrLogin/tech-momentum-ai:$imageTag" `
     --set-env-vars $envArgs --output none
 } else {
   az containerapp update --name $app --resource-group $ResourceGroup `
-    --image "$acrLogin/tech-momentum-ai:latest" --output none
+    --image "$acrLogin/tech-momentum-ai:$imageTag" --output none
 }
 
 $fqdn = az containerapp show --name $app --resource-group $ResourceGroup --query properties.configuration.ingress.fqdn -o tsv

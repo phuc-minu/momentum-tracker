@@ -1,4 +1,4 @@
-# Tech Momentum AI — Azure MVP
+# Stock Momentum AI — Azure MVP
 
 This is the Azure deployment scaffold for a momentum-first investing agent.
 
