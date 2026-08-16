@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from discover import _live_discovery_universe
 from main import app
 from marketdata import demo_candles
 from momentum import score_symbol
@@ -60,6 +61,16 @@ def test_demo_discover_endpoint_returns_movers():
     assert payload["results"][0]["put_call_ratio"] is not None
     assert payload["results"][0]["put_call_source"] == "demo"
     assert payload["results"][0]["preferred_contract"] is not None
+
+
+def test_live_discovery_universe_uses_sector_universe_not_sample(monkeypatch):
+    monkeypatch.delenv("DISCOVERY_UNIVERSE", raising=False)
+
+    universe = _live_discovery_universe()
+
+    assert "PLTR" in universe
+    assert "QQQ" not in universe
+    assert len(universe) > 50
 
 
 def test_live_scan_without_api_key_returns_503(monkeypatch):

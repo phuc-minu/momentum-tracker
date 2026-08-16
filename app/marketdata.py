@@ -26,8 +26,15 @@ class MarketDataClient:
         params = {"countback": countback}
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.get(url, headers=headers, params=params)
-            response.raise_for_status()
+            try:
+                response = await client.get(url, headers=headers, params=params)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                raise MarketDataError(_http_error_message(error)) from error
+            except httpx.TimeoutException as error:
+                raise MarketDataError(f"MarketData request timed out for {symbol}") from error
+            except httpx.HTTPError as error:
+                raise MarketDataError(f"MarketData request failed for {symbol}: {error}") from error
             payload = response.json()
 
         status = payload.get("s")
@@ -38,6 +45,31 @@ class MarketDataClient:
             raise MarketDataError(message)
 
         return _parse_marketdata_candles(payload)
+
+    async def bulk_candles(
+        self,
+        symbols: list[str],
+        *,
+        date: str | None = None,
+        resolution: str = "D",
+    ) -> dict[str, Candle]:
+        if not self.api_key:
+            raise MarketDataError("MARKETDATA_API_KEY is required for live market data")
+        if not symbols:
+            return {}
+
+        params = {"symbols": ",".join(symbols)}
+        if date:
+            params["date"] = date
+        payload = await self._get(
+            f"https://api.marketdata.app/v1/stocks/bulkcandles/{resolution}/",
+            params,
+        )
+        if payload.get("s") == "no_data":
+            return {}
+        if payload.get("s") != "ok":
+            raise MarketDataError(payload.get("errmsg", f"Unexpected bulk candles status: {payload.get('s')}"))
+        return _parse_marketdata_bulk_candles(payload)
 
     async def earnings(self, symbol: str, countback: int = 2) -> list[dict]:
         if not self.api_key:
@@ -110,9 +142,56 @@ class MarketDataClient:
     async def _get(self, url: str, params: dict) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.get(url, headers=headers, params=params)
-            response.raise_for_status()
+            try:
+                response = await client.get(url, headers=headers, params=params)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                raise MarketDataError(_http_error_message(error)) from error
+            except httpx.TimeoutException as error:
+                raise MarketDataError("MarketData request timed out") from error
+            except httpx.HTTPError as error:
+                raise MarketDataError(f"MarketData request failed: {error}") from error
             return response.json()
+
+
+def _http_error_message(error: httpx.HTTPStatusError) -> str:
+    status_code = error.response.status_code
+    provider_message = _provider_error_message(error.response)
+    rate_limit = _rate_limit_summary(error.response)
+    if status_code == 429:
+        details = ". ".join(item for item in [provider_message, rate_limit] if item)
+        suffix = f" {details}" if details else ""
+        return f"MarketData rate limit reached.{suffix}"
+    if status_code == 403:
+        return "MarketData access is temporarily blocked. The provider allows one active device/IP per token; wait a few minutes before retrying from Azure."
+    return f"MarketData returned HTTP {status_code}"
+
+
+def _provider_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    message = payload.get("errmsg") or payload.get("message")
+    return str(message) if message else ""
+
+
+def _rate_limit_summary(response: httpx.Response) -> str:
+    headers = response.headers
+    limit = headers.get("x-api-ratelimit-limit")
+    remaining = headers.get("x-api-ratelimit-remaining")
+    reset = headers.get("x-api-ratelimit-reset")
+    consumed = headers.get("x-api-ratelimit-consumed")
+    pieces = []
+    if remaining is not None:
+        pieces.append(f"remaining={remaining}")
+    if limit is not None:
+        pieces.append(f"limit={limit}")
+    if consumed is not None:
+        pieces.append(f"consumed={consumed}")
+    if reset is not None:
+        pieces.append(f"reset={reset}")
+    return f"Rate limit headers: {', '.join(pieces)}." if pieces else ""
 
 
 def _parse_marketdata_candles(payload: dict) -> list[Candle]:
@@ -134,6 +213,30 @@ def _parse_marketdata_candles(payload: dict) -> list[Candle]:
                 close=float(closes[index]),
                 volume=int(volumes[index]) if index < len(volumes) and volumes[index] is not None else 0,
             )
+        )
+    return candles
+
+
+def _parse_marketdata_bulk_candles(payload: dict) -> dict[str, Candle]:
+    symbols = payload.get("symbol", [])
+    opens = payload.get("o", [])
+    highs = payload.get("h", [])
+    lows = payload.get("l", [])
+    closes = payload.get("c", [])
+    volumes = payload.get("v", [])
+    timestamps = payload.get("t", [])
+
+    candles: dict[str, Candle] = {}
+    for index, symbol in enumerate(symbols):
+        if index >= len(closes) or closes[index] is None:
+            continue
+        candles[str(symbol).upper()] = Candle(
+            timestamp=int(timestamps[index]),
+            open=float(opens[index]),
+            high=float(highs[index]),
+            low=float(lows[index]),
+            close=float(closes[index]),
+            volume=int(volumes[index]) if index < len(volumes) and volumes[index] is not None else 0,
         )
     return candles
 

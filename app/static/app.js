@@ -1,11 +1,13 @@
 const state = {
   results: [],
   selectedSymbol: null,
+  liveDataAvailable: false,
 };
 
 const elements = {
   apiStatus: document.querySelector("#apiStatus"),
   apiStatusText: document.querySelector("#apiStatusText"),
+  modeNotice: document.querySelector("#modeNotice"),
   symbolsInput: document.querySelector("#symbolsInput"),
   benchmarkInput: document.querySelector("#benchmarkInput"),
   countbackInput: document.querySelector("#countbackInput"),
@@ -54,11 +56,15 @@ async function checkHealth() {
   try {
     const response = await fetch("/health");
     const payload = await response.json();
+    state.liveDataAvailable = Boolean(payload.marketdata_configured);
     elements.apiStatus.className = "status-dot ok";
-    elements.apiStatusText.textContent = payload.marketdata_configured ? "Live ready" : "Beta ready";
+    elements.apiStatusText.textContent = state.liveDataAvailable ? "Live ready" : "Beta ready";
+    renderModeNotice();
   } catch {
+    state.liveDataAvailable = false;
     elements.apiStatus.className = "status-dot bad";
     elements.apiStatusText.textContent = "Offline";
+    renderModeNotice("Unable to check live data status. Showing beta data when available.");
   }
 }
 
@@ -67,7 +73,7 @@ async function runScan() {
     symbols: elements.symbolsInput.value,
     benchmark: elements.benchmarkInput.value || "QQQ",
     countback: elements.countbackInput.value,
-    demo: "true",
+    demo: state.liveDataAvailable ? "false" : "true",
   });
 
   elements.scanButton.disabled = true;
@@ -75,7 +81,7 @@ async function runScan() {
 
   try {
     const response = await fetch(`/scan?${params.toString()}`);
-    const payload = await response.json();
+    const payload = await readJsonResponse(response);
     if (!response.ok) throw new Error(payload.detail || "Scan failed");
 
     state.results = payload.results;
@@ -90,9 +96,29 @@ async function runScan() {
     renderTable();
     renderEmptyDetail(error.message);
     drawScores();
+    if (state.liveDataAvailable) renderModeNotice(`Live scanner request failed. ${error.message}`);
   } finally {
     elements.scanButton.disabled = false;
   }
+}
+
+async function runScanFallback(reason) {
+  const params = new URLSearchParams({
+    symbols: elements.symbolsInput.value,
+    benchmark: elements.benchmarkInput.value || "QQQ",
+    countback: elements.countbackInput.value,
+    demo: "true",
+  });
+  const response = await fetch(`/scan?${params.toString()}`);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.detail || reason);
+  state.results = payload.results;
+  state.selectedSymbol = payload.results[0]?.symbol || null;
+  renderSummary(payload);
+  renderTable();
+  renderDetail();
+  drawScores();
+  renderModeNotice(`Live scanner request failed. Showing beta data. ${reason}`);
 }
 
 async function runDiscover() {
@@ -101,7 +127,7 @@ async function runDiscover() {
     period_days: elements.periodInput.value,
     limit: elements.limitInput.value,
     exclude_earnings: elements.excludeEarningsToggle.checked ? "true" : "false",
-    demo: "true",
+    demo: state.liveDataAvailable ? "false" : "true",
   });
 
   elements.discoverButton.disabled = true;
@@ -109,15 +135,31 @@ async function runDiscover() {
 
   try {
     const response = await fetch(`/discover?${params.toString()}`);
-    const payload = await response.json();
+    const payload = await readJsonResponse(response);
     if (!response.ok) throw new Error(payload.detail || "Discovery failed");
     renderDiscovery(payload);
   } catch (error) {
     elements.discoverMeta.textContent = error.message;
     elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${error.message}</td></tr>`;
+    if (state.liveDataAvailable) renderModeNotice(`Live discovery request failed. ${error.message}`);
   } finally {
     elements.discoverButton.disabled = false;
   }
+}
+
+async function runDiscoverFallback(reason) {
+  const params = new URLSearchParams({
+    growth_min: elements.growthInput.value,
+    period_days: elements.periodInput.value,
+    limit: elements.limitInput.value,
+    exclude_earnings: elements.excludeEarningsToggle.checked ? "true" : "false",
+    demo: "true",
+  });
+  const response = await fetch(`/discover?${params.toString()}`);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.detail || reason);
+  renderDiscovery(payload);
+  renderModeNotice(`Live data request failed. Showing beta data. ${reason}`);
 }
 
 function renderDiscovery(payload) {
@@ -149,6 +191,16 @@ function renderDiscovery(payload) {
     .join("");
 }
 
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
+
 function renderSummary(payload) {
   const average = payload.results.length
     ? payload.results.reduce((total, item) => total + item.score, 0) / payload.results.length
@@ -158,6 +210,21 @@ function renderSummary(payload) {
   elements.topSetup.textContent = payload.results[0]?.setup || "--";
   elements.dataMode.textContent = displayMode(payload.data_mode);
   elements.scanMeta.textContent = `${payload.count} symbols vs ${payload.benchmark}`;
+}
+
+function renderModeNotice(message) {
+  if (message) {
+    elements.modeNotice.textContent = message;
+    elements.modeNotice.className = "mode-notice warning";
+    return;
+  }
+  if (state.liveDataAvailable) {
+    elements.modeNotice.textContent = "Live MarketData mode: price growth and options activity are calculated from provider data.";
+    elements.modeNotice.className = "mode-notice live";
+  } else {
+    elements.modeNotice.textContent = "Beta data mode: live MarketData is not configured yet, so displayed growth and options values are generated preview data.";
+    elements.modeNotice.className = "mode-notice beta";
+  }
 }
 
 function renderTable() {
@@ -343,6 +410,10 @@ function formatExpiration(expiration) {
   return value.slice(0, 10);
 }
 
-checkHealth();
-runScan();
-runDiscover();
+async function init() {
+  await checkHealth();
+  runScan();
+  runDiscover();
+}
+
+init();

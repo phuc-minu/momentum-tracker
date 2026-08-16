@@ -129,4 +129,10 @@ async def run_scan(request: ScanRequest) -> ScanResponse:
 
 
 async def _fetch_symbols(client: MarketDataClient, symbols: list[str], countback: int):
-    return await asyncio.gather(*(client.candles(symbol, countback) for symbol in symbols))
+    semaphore = asyncio.Semaphore(2)
+
+    async def fetch(symbol: str):
+        async with semaphore:
+            return await client.candles(symbol, countback)
+
+    return await asyncio.gather(*(fetch(symbol) for symbol in symbols))

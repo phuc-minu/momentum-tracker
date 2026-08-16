@@ -19,6 +19,8 @@
         </div>
       </header>
 
+      <div id="modeNotice" class="mode-notice">Checking data mode</div>
+
       <nav class="tabs" aria-label="Dashboard views">
         <button class="tab-button active" type="button" data-tab="discoveryPanel">Discovery</button>
         <button class="tab-button" type="button" data-tab="scannerPanel">Momentum Scanner</button>
@@ -37,8 +39,9 @@
           <label class="field">
             <span>Min Growth</span>
             <select id="growthInput">
+              <option value="0.05" selected>5%</option>
               <option value="0.15">15%</option>
-              <option value="0.20" selected>20%</option>
+              <option value="0.20">20%</option>
               <option value="0.30">30%</option>
             </select>
           </label>
@@ -59,7 +62,7 @@
             </select>
           </label>
           <label class="toggle">
-            <input id="excludeEarningsToggle" type="checkbox" checked />
+            <input id="excludeEarningsToggle" type="checkbox" />
             <span></span>
             <strong>Exclude Earnings</strong>
           </label>

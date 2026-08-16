@@ -1,8 +1,10 @@
 import asyncio
 import hashlib
+import os
 from datetime import UTC, datetime
+from datetime import timedelta
 
-from marketdata import MarketDataClient, demo_candles
+from marketdata import MarketDataClient, MarketDataError, demo_candles
 from options_activity import analyze_options_activity, demo_options_activity
 from schemas import Candle, DiscoveryCandidate, NewsItem
 from universe import discovery_universe
@@ -31,7 +33,7 @@ async def discover_movers(
     exclude_earnings: bool = True,
     demo: bool = False,
 ) -> list[DiscoveryCandidate]:
-    universe = discovery_universe()
+    universe = _live_discovery_universe() if not demo else discovery_universe()
     if demo:
         candidates = [
             await _build_candidate(
@@ -47,49 +49,248 @@ async def discover_movers(
         ]
     else:
         client = MarketDataClient(timeout_seconds=30.0)
-        candidates = await asyncio.gather(
-            *(
-                _build_live_candidate(client, symbol, sector, period_days)
-                for symbol, sector in universe.items()
-            )
+        if not client.api_key:
+            raise MarketDataError("MARKETDATA_API_KEY is required for live market data")
+        candidates = await _discover_live_candidates(
+            client,
+            universe,
+            period_days=period_days,
+            growth_min=growth_min,
+            limit=limit,
+            exclude_earnings=exclude_earnings,
         )
 
-    candidates = [candidate for candidate in candidates if candidate]
-    candidates = _apply_relative_strength_percentiles(candidates)
+    if demo:
+        candidates = [candidate for candidate in candidates if candidate]
+        candidates = _apply_relative_strength_percentiles(candidates)
+
+        filtered = [
+            candidate
+            for candidate in candidates
+            if candidate.return_2w >= growth_min
+            and (not exclude_earnings or not candidate.likely_earnings_related)
+        ]
+        filtered.sort(key=lambda item: item.momentum_score, reverse=True)
+        return filtered[:limit]
+
+    return candidates
+
+
+async def _discover_live_candidates(
+    client: MarketDataClient,
+    universe: dict[str, str],
+    *,
+    period_days: int,
+    growth_min: float,
+    limit: int,
+    exclude_earnings: bool,
+) -> list[DiscoveryCandidate]:
+    price_candidates = await _build_bulk_price_candidates(client, universe, period_days)
+
+    price_candidates = [candidate for candidate in price_candidates if candidate]
+    price_candidates = _apply_relative_strength_percentiles(price_candidates)
+
+    preliminary = [
+        candidate
+        for candidate in price_candidates
+        if candidate.return_2w >= growth_min
+    ]
+    preliminary.sort(key=lambda item: item.momentum_score, reverse=True)
+
+    enriched: list[DiscoveryCandidate] = []
+    batch_size = max(limit * 2, 12)
+    for index in range(0, len(preliminary), batch_size):
+        batch = preliminary[index : index + batch_size]
+        enriched_batch = await _gather_limited(
+            (
+                _enrich_live_candidate(client, candidate, period_days)
+                for candidate in batch
+            ),
+            limit=_live_request_concurrency(),
+        )
+        enriched.extend(candidate for candidate in enriched_batch if candidate)
+        filtered = [
+            candidate
+            for candidate in enriched
+            if not exclude_earnings or not candidate.likely_earnings_related
+        ]
+        if len(filtered) >= limit:
+            filtered.sort(key=lambda item: item.momentum_score, reverse=True)
+            return filtered[:limit]
 
     filtered = [
         candidate
-        for candidate in candidates
-        if candidate.return_2w >= growth_min
-        and (not exclude_earnings or not candidate.likely_earnings_related)
+        for candidate in enriched
+        if not exclude_earnings or not candidate.likely_earnings_related
     ]
     filtered.sort(key=lambda item: item.momentum_score, reverse=True)
     return filtered[:limit]
 
 
-async def _build_live_candidate(
+async def _build_bulk_price_candidates(
+    client: MarketDataClient,
+    universe: dict[str, str],
+    period_days: int,
+) -> list[DiscoveryCandidate]:
+    symbols = list(universe)
+    latest = await client.bulk_candles(symbols)
+    if not latest:
+        return []
+
+    latest_timestamp = max(candle.timestamp for candle in latest.values())
+    start = {}
+    start_date = _previous_trading_date(latest_timestamp, period_days)
+    for offset in range(5):
+        candidate_date = _previous_calendar_date(start_date, offset)
+        start = await client.bulk_candles(symbols, date=candidate_date)
+        if start:
+            break
+
+    if not start:
+        return []
+
+    candidates: list[DiscoveryCandidate] = []
+    for symbol, sector in universe.items():
+        start_candle = start.get(symbol)
+        last_candle = latest.get(symbol)
+        candidate = _build_candidate_from_candle_pair(symbol, sector, start_candle, last_candle)
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
+def _build_candidate_from_candle_pair(
+    symbol: str,
+    sector: str,
+    start: Candle | None,
+    last: Candle | None,
+) -> DiscoveryCandidate | None:
+    if start is None or last is None or start.close <= 0:
+        return None
+
+    return_2w = last.close / start.close - 1
+    price_signal = "new 20-day high" if last.close >= start.close else "momentum continuation"
+    setup = _setup_label(return_2w, price_signal, None)
+    momentum_score = _momentum_score(return_2w, price_signal, None, None)
+
+    return DiscoveryCandidate(
+        symbol=symbol,
+        sector=sector,
+        momentum_score=momentum_score,
+        setup=setup,
+        price_signal=price_signal,
+        relative_strength_percentile=0,
+        volume_ratio_20d=None,
+        return_2w=round(return_2w, 4),
+        start_close=round(start.close, 2),
+        last_close=round(last.close, 2),
+        put_call_ratio=None,
+        put_call_source="unavailable",
+        call_volume=None,
+        call_open_interest=None,
+        call_activity_ratio=None,
+        call_activity="unavailable",
+        preferred_contract=None,
+        earnings_near_move=False,
+        earnings_checked=False,
+        likely_earnings_related=False,
+        catalyst="price momentum; catalyst not identified",
+        headlines=[],
+    )
+
+
+def _previous_trading_date(timestamp: int, trading_days: int) -> str:
+    value = datetime.fromtimestamp(timestamp, UTC).date()
+    remaining = trading_days
+    while remaining:
+        value -= timedelta(days=1)
+        if value.weekday() < 5:
+            remaining -= 1
+    return value.isoformat()
+
+
+def _previous_calendar_date(date_value: str, days: int) -> str:
+    value = datetime.fromisoformat(date_value).date()
+    return (value - timedelta(days=days)).isoformat()
+
+
+async def _gather_limited(coroutines, *, limit: int):
+    semaphore = asyncio.Semaphore(limit)
+
+    async def run(coroutine):
+        async with semaphore:
+            return await coroutine
+
+    return await asyncio.gather(*(run(coroutine) for coroutine in coroutines))
+
+
+def _live_discovery_universe() -> dict[str, str]:
+    return {
+        symbol: sector
+        for symbol, sector in discovery_universe().items()
+        if symbol != "QQQ"
+    }
+
+
+def _live_request_concurrency() -> int:
+    raw = os.getenv("MARKETDATA_CONCURRENCY", "2")
+    try:
+        return max(1, min(int(raw), 5))
+    except ValueError:
+        return 2
+
+
+async def _build_live_price_candidate(
     client: MarketDataClient,
     symbol: str,
     sector: str,
     period_days: int,
 ) -> DiscoveryCandidate | None:
-    candles = await client.candles(symbol, countback=max(period_days + 5, 260))
+    try:
+        candles = await client.candles(symbol, countback=max(period_days + 5, 260))
+    except MarketDataError:
+        return None
     if not candles:
         return None
-    earnings, news, option_rows = await asyncio.gather(
-        _safe_earnings(client, symbol),
-        _safe_news(client, symbol),
-        _safe_option_chain(client, symbol),
-    )
     return await _build_candidate(
         symbol,
         sector,
+        candles,
+        [],
+        earnings=None,
+        options_activity=None,
+        period_days=period_days,
+    )
+
+
+async def _enrich_live_candidate(
+    client: MarketDataClient,
+    candidate: DiscoveryCandidate,
+    period_days: int,
+) -> DiscoveryCandidate | None:
+    try:
+        candles = await client.candles(candidate.symbol, countback=max(period_days + 5, 260))
+    except MarketDataError:
+        return candidate
+
+    earnings, news = await asyncio.gather(
+        _safe_earnings(client, candidate.symbol),
+        _safe_news(client, candidate.symbol),
+    )
+    option_rows = await _safe_option_chain(client, candidate.symbol) if _enrich_options_enabled() else []
+    return await _build_candidate(
+        candidate.symbol,
+        candidate.sector,
         candles,
         news,
         earnings=earnings,
         options_activity=analyze_options_activity(option_rows),
         period_days=period_days,
     )
+
+
+def _enrich_options_enabled() -> bool:
+    return os.getenv("DISCOVERY_OPTIONS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 async def _build_candidate(
