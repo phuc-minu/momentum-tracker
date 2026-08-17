@@ -5,6 +5,13 @@ const state = {
 };
 
 const elements = {
+  loginScreen: document.querySelector("#loginScreen"),
+  loginForm: document.querySelector("#loginForm"),
+  passwordInput: document.querySelector("#passwordInput"),
+  loginButton: document.querySelector("#loginButton"),
+  loginMessage: document.querySelector("#loginMessage"),
+  dashboard: document.querySelector("#dashboard"),
+  logoutButton: document.querySelector("#logoutButton"),
   apiStatus: document.querySelector("#apiStatus"),
   apiStatusText: document.querySelector("#apiStatusText"),
   modeNotice: document.querySelector("#modeNotice"),
@@ -35,6 +42,8 @@ const elements = {
   tabPanels: document.querySelectorAll(".tab-panel"),
 };
 
+elements.loginForm.addEventListener("submit", login);
+elements.logoutButton.addEventListener("click", logout);
 elements.scanButton.addEventListener("click", runScan);
 elements.discoverButton.addEventListener("click", runDiscover);
 elements.tabButtons.forEach((button) => {
@@ -70,6 +79,63 @@ async function checkHealth() {
   }
 }
 
+async function checkAuth() {
+  try {
+    const response = await fetch("/auth/status");
+    const payload = await readJsonResponse(response);
+    if (payload.authenticated) {
+      showDashboard();
+      await loadDashboard();
+    } else {
+      showLogin();
+    }
+  } catch {
+    showLogin("Unable to check login status.");
+  }
+}
+
+async function login(event) {
+  event.preventDefault();
+  elements.loginButton.disabled = true;
+  elements.loginMessage.textContent = "Checking";
+
+  try {
+    const response = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: elements.passwordInput.value }),
+    });
+    const payload = await readJsonResponse(response);
+    if (!response.ok) throw new Error(payload.detail || "Login failed");
+    elements.passwordInput.value = "";
+    showDashboard();
+    await loadDashboard();
+  } catch (error) {
+    elements.loginMessage.textContent = error.message;
+  } finally {
+    elements.loginButton.disabled = false;
+  }
+}
+
+async function logout() {
+  await fetch("/auth/logout", { method: "POST" });
+  state.results = [];
+  elements.passwordInput.value = "";
+  showLogin();
+}
+
+function showLogin(message = "") {
+  elements.dashboard.hidden = true;
+  elements.loginScreen.hidden = false;
+  elements.loginMessage.textContent = message;
+  elements.passwordInput.focus();
+}
+
+function showDashboard() {
+  elements.loginScreen.hidden = true;
+  elements.dashboard.hidden = false;
+}
+
 async function runScan() {
   const params = new URLSearchParams({
     symbols: elements.symbolsInput.value,
@@ -84,6 +150,10 @@ async function runScan() {
   try {
     const response = await fetch(`/scan?${params.toString()}`);
     const payload = await readJsonResponse(response);
+    if (response.status === 401) {
+      showLogin(payload.detail || "Login required");
+      return;
+    }
     if (!response.ok) throw new Error(payload.detail || "Scan failed");
 
     state.results = payload.results;
@@ -125,6 +195,10 @@ async function runScanFallback(reason) {
   });
   const response = await fetch(`/scan?${params.toString()}`);
   const payload = await response.json();
+  if (response.status === 401) {
+    showLogin(payload.detail || "Login required");
+    return;
+  }
   if (!response.ok) throw new Error(payload.detail || reason);
   state.results = payload.results;
   state.selectedSymbol = payload.results[0]?.symbol || null;
@@ -151,6 +225,10 @@ async function runDiscover() {
   try {
     const response = await fetch(`/discover?${params.toString()}`);
     const payload = await readJsonResponse(response);
+    if (response.status === 401) {
+      showLogin(payload.detail || "Login required");
+      return;
+    }
     if (!response.ok) throw new Error(payload.detail || "Discovery failed");
     renderDiscovery(payload);
   } catch (error) {
@@ -182,6 +260,10 @@ async function runDiscoverFallback(reason) {
   });
   const response = await fetch(`/discover?${params.toString()}`);
   const payload = await response.json();
+  if (response.status === 401) {
+    showLogin(payload.detail || "Login required");
+    return;
+  }
   if (!response.ok) throw new Error(payload.detail || reason);
   renderDiscovery(payload);
   renderModeNotice(`Live data request failed. Showing beta data. ${reason}`);
@@ -496,6 +578,10 @@ function escapeAttribute(value) {
 }
 
 async function init() {
+  await checkAuth();
+}
+
+async function loadDashboard() {
   await checkHealth();
   updateGrowthColumnHeader();
   runScan();

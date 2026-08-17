@@ -4,18 +4,36 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stock Momentum AI</title>
-    <link rel="stylesheet" href="/static/styles.css?v=202608161735" />
+    <link rel="stylesheet" href="/static/styles.css?v=202608171030" />
   </head>
   <body>
-    <main class="shell">
+    <section id="loginScreen" class="login-screen" hidden>
+      <form id="loginForm" class="login-panel">
+        <p class="eyebrow">Private Dashboard</p>
+        <h1>Stock Momentum AI</h1>
+        <label class="field">
+          <span>Password</span>
+          <input id="passwordInput" type="password" autocomplete="current-password" />
+        </label>
+        <button id="loginButton" class="primary-button" type="submit">
+          <span>Login</span>
+        </button>
+        <p id="loginMessage" class="login-message"></p>
+      </form>
+    </section>
+
+    <main id="dashboard" class="shell" hidden>
       <header class="topbar">
         <div>
           <p class="eyebrow">Stock Momentum AI</p>
           <h1>Stock Momentum AI</h1>
         </div>
-        <div class="status-strip">
-          <span id="apiStatus" class="status-dot"></span>
-          <span id="apiStatusText">Checking</span>
+        <div class="topbar-actions">
+          <div class="status-strip">
+            <span id="apiStatus" class="status-dot"></span>
+            <span id="apiStatusText">Checking</span>
+          </div>
+          <button id="logoutButton" class="secondary-button" type="button">Logout</button>
         </div>
       </header>
 
@@ -193,6 +211,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=202608161810"></script>
+    <script src="/static/app.js?v=202608171030"></script>
   </body>
 </html>

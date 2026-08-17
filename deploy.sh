@@ -30,6 +30,14 @@ if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   az keyvault secret set --vault-name "$vault" --name openai-api-key --value "$OPENAI_API_KEY" >/dev/null
 fi
 
+if [[ -n "${APP_PASSWORD:-}" ]]; then
+  az keyvault secret set --vault-name "$vault" --name app-password --value "$APP_PASSWORD" >/dev/null
+fi
+
+if [[ -n "${APP_SESSION_SECRET:-}" ]]; then
+  az keyvault secret set --vault-name "$vault" --name app-session-secret --value "$APP_SESSION_SECRET" >/dev/null
+fi
+
 az acr build --registry "$acr" --image "tech-momentum-ai:$image_tag" --no-logs ./app
 acr_login=$(az acr show -n "$acr" --query loginServer -o tsv)
 az containerapp registry set -n "$app" -g "$RESOURCE_GROUP" --server "$acr_login" --identity "$identity_id" >/dev/null
@@ -43,6 +51,14 @@ fi
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   secret_args+=("openai-api-key=keyvaultref:https://$vault.vault.azure.net/secrets/openai-api-key,identityref:$identity_id")
   env_args+=("OPENAI_API_KEY=secretref:openai-api-key")
+fi
+if [[ -n "${APP_PASSWORD:-}" ]]; then
+  secret_args+=("app-password=keyvaultref:https://$vault.vault.azure.net/secrets/app-password,identityref:$identity_id")
+  env_args+=("APP_PASSWORD=secretref:app-password")
+fi
+if [[ -n "${APP_SESSION_SECRET:-}" ]]; then
+  secret_args+=("app-session-secret=keyvaultref:https://$vault.vault.azure.net/secrets/app-session-secret,identityref:$identity_id")
+  env_args+=("APP_SESSION_SECRET=secretref:app-session-secret")
 fi
 
 if [[ ${#secret_args[@]} -gt 0 ]]; then

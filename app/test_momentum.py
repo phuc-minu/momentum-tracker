@@ -9,6 +9,12 @@ from momentum import score_symbol
 from options_activity import analyze_options_activity
 from schemas import DiscoveryCandidate
 
+TEST_PASSWORD = "test-password"
+
+
+def login(client: TestClient, password: str = TEST_PASSWORD):
+    return client.post("/auth/login", json={"password": password})
+
 
 def test_score_symbol_returns_rankable_signal():
     benchmark = demo_candles("QQQ", 260)
@@ -22,8 +28,10 @@ def test_score_symbol_returns_rankable_signal():
     assert signal.notes
 
 
-def test_demo_scan_endpoint_ranks_results():
+def test_demo_scan_endpoint_ranks_results(monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
     client = TestClient(app)
+    login(client)
 
     response = client.get("/scan", params={"symbols": "NVDA,MSFT,AAPL", "demo": "true"})
 
@@ -47,8 +55,10 @@ def test_dashboard_served_at_root():
     assert "Demo" not in response.text
 
 
-def test_demo_discover_endpoint_returns_movers():
+def test_demo_discover_endpoint_returns_movers(monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
     client = TestClient(app)
+    login(client)
 
     response = client.get("/discover", params={"demo": "true", "growth_min": "0.20", "limit": "10"})
 
@@ -92,9 +102,34 @@ def test_discovery_sort_uses_score_then_options_confirmation():
     assert [candidate.symbol for candidate in candidates] == ["BBB", "CCC", "AAA", "DDD"]
 
 
+def test_scan_requires_login(monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
+    client = TestClient(app)
+
+    response = client.get("/scan", params={"symbols": "NVDA", "demo": "true"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Login required"
+
+
+def test_login_accepts_configured_password(monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
+    client = TestClient(app)
+
+    bad_response = login(client, "wrong")
+    good_response = login(client, TEST_PASSWORD)
+    status_response = client.get("/auth/status")
+
+    assert bad_response.status_code == 401
+    assert good_response.status_code == 200
+    assert status_response.json()["authenticated"] is True
+
+
 def test_live_scan_without_api_key_returns_503(monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
     monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     client = TestClient(app)
+    login(client)
 
     response = client.get("/scan", params={"symbols": "NVDA", "demo": "false"})
 

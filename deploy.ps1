@@ -51,6 +51,14 @@ if ($env:OPENAI_API_KEY) {
   az keyvault secret set --vault-name $vault --name openai-api-key --value $env:OPENAI_API_KEY --output none
 }
 
+if ($env:APP_PASSWORD) {
+  az keyvault secret set --vault-name $vault --name app-password --value $env:APP_PASSWORD --output none
+}
+
+if ($env:APP_SESSION_SECRET) {
+  az keyvault secret set --vault-name $vault --name app-session-secret --value $env:APP_SESSION_SECRET --output none
+}
+
 az acr build --registry $acr --image "tech-momentum-ai:$imageTag" --no-logs ./app
 
 $acrLogin = az acr show --name $acr --query loginServer -o tsv
@@ -75,6 +83,16 @@ if ($env:OPENAI_API_KEY) {
   $openaiSecretUri = "https://$vault.vault.azure.net/secrets/openai-api-key"
   $secretArgs += "openai-api-key=keyvaultref:$openaiSecretUri,identityref:$identityId"
   $envArgs += "OPENAI_API_KEY=secretref:openai-api-key"
+}
+if ($env:APP_PASSWORD) {
+  $appPasswordSecretUri = "https://$vault.vault.azure.net/secrets/app-password"
+  $secretArgs += "app-password=keyvaultref:$appPasswordSecretUri,identityref:$identityId"
+  $envArgs += "APP_PASSWORD=secretref:app-password"
+}
+if ($env:APP_SESSION_SECRET) {
+  $appSessionSecretUri = "https://$vault.vault.azure.net/secrets/app-session-secret"
+  $secretArgs += "app-session-secret=keyvaultref:$appSessionSecretUri,identityref:$identityId"
+  $envArgs += "APP_SESSION_SECRET=secretref:app-session-secret"
 }
 
 if ($secretArgs.Count -gt 0) {

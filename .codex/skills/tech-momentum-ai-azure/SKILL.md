@@ -43,6 +43,11 @@ Container App secret refs use the same secret names and expose:
 
 Do not print secret values. Check only presence or configuration status.
 
+Authentication settings:
+- `APP_PASSWORD` is required for dashboard login and should be stored as a Key Vault-backed Container App secret.
+- `APP_SESSION_SECRET` optionally controls the HMAC cookie signing secret.
+- If `APP_SESSION_SECRET` is not configured, the app derives the cookie token from `APP_PASSWORD`.
+
 ## Deploy
 
 From the repository root, deploy with:
@@ -99,6 +104,7 @@ Current known result: `16 passed`.
 - `gh` CLI was not installed as of August 16, 2026. Use normal `git` for commit/push unless GitHub PR automation is specifically needed.
 - MarketData live calls can hit account credit limits. On August 16, 2026, a rate-limit reset header of `1786973400` decoded to `2026-08-17T13:30:00+00:00`.
 - The frontend now falls back to beta/demo data when live MarketData scanner or discovery requests fail.
+- The dashboard and token-spending endpoints require login. `/health` and static assets remain public.
 
 ## Recent Commits
 
