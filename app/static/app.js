@@ -143,7 +143,7 @@ async function runDiscover() {
     renderDiscovery(payload);
   } catch (error) {
     elements.discoverMeta.textContent = error.message;
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${error.message}</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="14">${error.message}</td></tr>`;
     if (state.liveDataAvailable) renderModeNotice(`Live discovery request failed. ${error.message}`);
   } finally {
     elements.discoverButton.disabled = false;
@@ -170,7 +170,7 @@ function renderDiscovery(payload) {
   updateGrowthColumnHeader(payload.period_days);
   elements.discoverMeta.textContent = `${payload.count} movers, ${displayMode(payload.data_mode)} mode`;
   if (!payload.results.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">No movers matched this filter</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="14">No movers matched this filter</td></tr>`;
     return;
   }
 
@@ -180,6 +180,7 @@ function renderDiscovery(payload) {
         <tr>
           <td>${index + 1}</td>
           <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
+          <td>${formatPrice(item.last_close)}</td>
           <td><strong title="${escapeAttribute(scoreHint(item))}" aria-label="${escapeAttribute(scoreHint(item))}">${item.momentum_score.toFixed(1)}</strong></td>
           <td><span class="sector-pill">${item.sector}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
@@ -356,6 +357,11 @@ function formatPercent(value) {
   if (value === null || value === undefined) return "--";
   const className = value >= 0 ? "positive" : "negative";
   return `<span class="${className}">${(value * 100).toFixed(1)}%</span>`;
+}
+
+function formatPrice(value) {
+  if (value === null || value === undefined) return "--";
+  return `$${value.toFixed(2)}`;
 }
 
 function formatRatio(value) {
