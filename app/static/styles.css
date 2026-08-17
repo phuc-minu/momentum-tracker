@@ -354,7 +354,7 @@ table {
 }
 
 .discover-table {
-  min-width: 1780px;
+  min-width: 1490px;
   table-layout: fixed;
   font-size: 12px;
 }
@@ -391,16 +391,8 @@ table {
   width: 128px;
 }
 
-.discover-table .col-catalyst {
-  width: 190px;
-}
-
-.discover-table .col-setup {
-  width: 130px;
-}
-
-.discover-table .col-trade {
-  width: 160px;
+.discover-table .col-catalyst-setup {
+  width: 260px;
 }
 
 th,

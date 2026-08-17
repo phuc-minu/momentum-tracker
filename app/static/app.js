@@ -143,7 +143,7 @@ async function runDiscover() {
     renderDiscovery(payload);
   } catch (error) {
     elements.discoverMeta.textContent = error.message;
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="14">${error.message}</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${error.message}</td></tr>`;
     if (state.liveDataAvailable) renderModeNotice(`Live discovery request failed. ${error.message}`);
   } finally {
     elements.discoverButton.disabled = false;
@@ -170,7 +170,7 @@ function renderDiscovery(payload) {
   updateGrowthColumnHeader(payload.period_days);
   elements.discoverMeta.textContent = `${payload.count} movers, ${displayMode(payload.data_mode)} mode`;
   if (!payload.results.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="14">No movers matched this filter</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No movers matched this filter</td></tr>`;
     return;
   }
 
@@ -189,9 +189,7 @@ function renderDiscovery(payload) {
           <td>${formatPutCall(item.put_call_ratio, item.put_call_source)}</td>
           <td>${formatCallActivity(item)}</td>
           <td>${formatOptionsConfirmation(item)}</td>
-          <td class="catalyst-cell">${item.catalyst}</td>
-          <td>${formatSetup(item.setup)}</td>
-          <td class="headline-cell">${formatPreferredTrade(item.preferred_contract)}</td>
+          <td class="catalyst-cell">${formatCatalystSetup(item)}</td>
         </tr>
       `;
     })
@@ -423,12 +421,9 @@ function optionsHint(item) {
   return pieces.join(" ");
 }
 
-function formatPreferredTrade(contract) {
-  if (!contract) return "--";
-  const expiration = formatExpiration(contract.expiration);
-  const delta = contract.delta === null || contract.delta === undefined ? "" : ` ~${Math.abs(contract.delta).toFixed(2)}Δ`;
-  const strike = contract.strike === null || contract.strike === undefined ? "" : ` $${contract.strike.toFixed(0)} C`;
-  return `${expiration}${strike}<span class="subtle block">${delta}</span>`;
+function formatCatalystSetup(item) {
+  const catalyst = item.catalyst || "--";
+  return `${catalyst}<span class="subtle block">${formatSetup(item.setup)}</span>`;
 }
 
 function compactNumber(value) {
@@ -469,19 +464,6 @@ function formatOptionsSignal(signal) {
   if (signal === "Options not confirming") return "Not confirming";
   if (signal === "Options weak") return "Weak";
   return "Unavailable";
-}
-
-function formatExpiration(expiration) {
-  const value = String(expiration || "");
-  if (!value) return "Expiration";
-  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return value.slice(0, 10);
-  return parsed.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 function escapeAttribute(value) {
