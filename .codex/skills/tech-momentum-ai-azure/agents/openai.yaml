@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tech Momentum AI Azure"
+  short_description: "Remember and operate this project's Azure deployment."
+  default_prompt: "Use this project's Azure deployment notes to deploy, verify, or inspect Tech Momentum AI resources."
