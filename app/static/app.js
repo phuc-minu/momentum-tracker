@@ -93,12 +93,24 @@ async function runScan() {
     renderDetail();
     drawScores();
   } catch (error) {
-    elements.scanMeta.textContent = error.message;
-    state.results = [];
-    renderTable();
-    renderEmptyDetail(error.message);
-    drawScores();
-    if (state.liveDataAvailable) renderModeNotice(`Live scanner request failed. ${error.message}`);
+    if (state.liveDataAvailable) {
+      try {
+        await runScanFallback(error.message);
+      } catch (fallbackError) {
+        elements.scanMeta.textContent = fallbackError.message;
+        state.results = [];
+        renderTable();
+        renderEmptyDetail(fallbackError.message);
+        drawScores();
+        renderModeNotice(`Live scanner request failed. ${error.message}`);
+      }
+    } else {
+      elements.scanMeta.textContent = error.message;
+      state.results = [];
+      renderTable();
+      renderEmptyDetail(error.message);
+      drawScores();
+    }
   } finally {
     elements.scanButton.disabled = false;
   }
@@ -142,9 +154,18 @@ async function runDiscover() {
     if (!response.ok) throw new Error(payload.detail || "Discovery failed");
     renderDiscovery(payload);
   } catch (error) {
-    elements.discoverMeta.textContent = error.message;
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${error.message}</td></tr>`;
-    if (state.liveDataAvailable) renderModeNotice(`Live discovery request failed. ${error.message}`);
+    if (state.liveDataAvailable) {
+      try {
+        await runDiscoverFallback(error.message);
+      } catch (fallbackError) {
+        elements.discoverMeta.textContent = fallbackError.message;
+        elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${fallbackError.message}</td></tr>`;
+        renderModeNotice(`Live discovery request failed. ${error.message}`);
+      }
+    } else {
+      elements.discoverMeta.textContent = error.message;
+      elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${error.message}</td></tr>`;
+    }
   } finally {
     elements.discoverButton.disabled = false;
   }
