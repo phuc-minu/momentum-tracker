@@ -42,6 +42,8 @@ const elements = {
   tabPanels: document.querySelectorAll(".tab-panel"),
 };
 
+class AuthRequiredError extends Error {}
+
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
 elements.scanButton.addEventListener("click", runScan);
@@ -81,7 +83,7 @@ async function checkHealth() {
 
 async function checkAuth() {
   try {
-    const response = await fetch("/auth/status");
+    const response = await fetch("/auth/status", { credentials: "same-origin" });
     const payload = await readJsonResponse(response);
     if (payload.authenticated) {
       showDashboard();
@@ -102,6 +104,7 @@ async function login(event) {
   try {
     const response = await fetch("/auth/login", {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password: elements.passwordInput.value }),
     });
@@ -118,7 +121,7 @@ async function login(event) {
 }
 
 async function logout() {
-  await fetch("/auth/logout", { method: "POST" });
+  await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
   state.results = [];
   elements.passwordInput.value = "";
   showLogin();
@@ -128,6 +131,8 @@ function showLogin(message = "") {
   elements.dashboard.hidden = true;
   elements.loginScreen.hidden = false;
   elements.loginMessage.textContent = message;
+  elements.discoverButton.disabled = false;
+  elements.scanButton.disabled = false;
   elements.passwordInput.focus();
 }
 
@@ -148,12 +153,9 @@ async function runScan() {
   elements.scanMeta.textContent = "Scanning";
 
   try {
-    const response = await fetch(`/scan?${params.toString()}`);
+    const response = await fetch(`/scan?${params.toString()}`, { credentials: "same-origin" });
     const payload = await readJsonResponse(response);
-    if (response.status === 401) {
-      showLogin(payload.detail || "Login required");
-      return;
-    }
+    requireAuthenticated(response, payload);
     if (!response.ok) throw new Error(payload.detail || "Scan failed");
 
     state.results = payload.results;
@@ -163,6 +165,7 @@ async function runScan() {
     renderDetail();
     drawScores();
   } catch (error) {
+    if (error instanceof AuthRequiredError) return;
     if (state.liveDataAvailable) {
       try {
         await runScanFallback(error.message);
@@ -193,12 +196,9 @@ async function runScanFallback(reason) {
     countback: elements.countbackInput.value,
     demo: "true",
   });
-  const response = await fetch(`/scan?${params.toString()}`);
-  const payload = await response.json();
-  if (response.status === 401) {
-    showLogin(payload.detail || "Login required");
-    return;
-  }
+  const response = await fetch(`/scan?${params.toString()}`, { credentials: "same-origin" });
+  const payload = await readJsonResponse(response);
+  requireAuthenticated(response, payload);
   if (!response.ok) throw new Error(payload.detail || reason);
   state.results = payload.results;
   state.selectedSymbol = payload.results[0]?.symbol || null;
@@ -223,15 +223,13 @@ async function runDiscover() {
   elements.discoverMeta.textContent = "Discovering";
 
   try {
-    const response = await fetch(`/discover?${params.toString()}`);
+    const response = await fetch(`/discover?${params.toString()}`, { credentials: "same-origin" });
     const payload = await readJsonResponse(response);
-    if (response.status === 401) {
-      showLogin(payload.detail || "Login required");
-      return;
-    }
+    requireAuthenticated(response, payload);
     if (!response.ok) throw new Error(payload.detail || "Discovery failed");
     renderDiscovery(payload);
   } catch (error) {
+    if (error instanceof AuthRequiredError) return;
     if (state.liveDataAvailable) {
       try {
         await runDiscoverFallback(error.message);
@@ -258,12 +256,9 @@ async function runDiscoverFallback(reason) {
     exclude_earnings: elements.excludeEarningsToggle.checked ? "true" : "false",
     demo: "true",
   });
-  const response = await fetch(`/discover?${params.toString()}`);
-  const payload = await response.json();
-  if (response.status === 401) {
-    showLogin(payload.detail || "Login required");
-    return;
-  }
+  const response = await fetch(`/discover?${params.toString()}`, { credentials: "same-origin" });
+  const payload = await readJsonResponse(response);
+  requireAuthenticated(response, payload);
   if (!response.ok) throw new Error(payload.detail || reason);
   renderDiscovery(payload);
   renderModeNotice(`Live data request failed. Showing beta data. ${reason}`);
@@ -318,6 +313,12 @@ async function readJsonResponse(response) {
   } catch {
     return { detail: text };
   }
+}
+
+function requireAuthenticated(response, payload) {
+  if (response.status !== 401) return;
+  showLogin(payload.detail === "Login required" ? "Session expired. Log in again." : payload.detail || "Login required");
+  throw new AuthRequiredError("Login required");
 }
 
 function renderSummary(payload) {

@@ -61,6 +61,8 @@ def _session_token() -> str:
 
 
 def _is_authenticated(request: Request) -> bool:
+    if not os.getenv("APP_PASSWORD"):
+        return False
     cookie = request.cookies.get(AUTH_COOKIE, "")
     return hmac.compare_digest(cookie, _session_token())
 
@@ -80,20 +82,22 @@ def auth_login(payload: LoginRequest, request: Request, response: Response):
     if not hmac.compare_digest(payload.password, _app_password()):
         raise HTTPException(status_code=401, detail="Invalid password")
 
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     response.set_cookie(
         AUTH_COOKIE,
         _session_token(),
         httponly=True,
-        secure=request.url.scheme == "https",
+        secure=forwarded_proto == "https",
         samesite="lax",
         max_age=60 * 60 * 12,
+        path="/",
     )
     return {"authenticated": True}
 
 
 @app.post("/auth/logout")
 def auth_logout(response: Response):
-    response.delete_cookie(AUTH_COOKIE)
+    response.delete_cookie(AUTH_COOKIE, path="/")
     return {"authenticated": False}
 
 
