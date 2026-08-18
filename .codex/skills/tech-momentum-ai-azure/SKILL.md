@@ -30,16 +30,23 @@ This skill stores non-secret deployment memory for the Stock Momentum AI / Tech 
 - User-assigned identity: `momentumai-identity`
 - Container Apps environment: `momentumai-env`
 - Log Analytics workspace: `momentumai-logs`
+- PostgreSQL Flexible Server: `momentumai-pg-rkdchlu5eqdos`
+- PostgreSQL FQDN: `momentumai-pg-rkdchlu5eqdos.postgres.database.azure.com`
+- PostgreSQL database: `momentumai`
+- PostgreSQL admin user: `momentumadmin`
+- PostgreSQL SKU: `Standard_B1ms` / Burstable, 32 GiB storage
 
 ## Secrets
 
 Key Vault stores:
 - `openai-api-key`
 - `marketdata-api-key`
+- `database-url`
 
 Container App secret refs use the same secret names and expose:
 - `OPENAI_API_KEY=secretref:openai-api-key`
 - `MARKETDATA_API_KEY=secretref:marketdata-api-key`
+- `DATABASE_URL=secretref:database-url` when Phase 2 PostgreSQL is configured
 
 Do not print secret values. Check only presence or configuration status.
 
@@ -95,7 +102,41 @@ Run tests from `app` using the project virtualenv:
 ..\.venv\Scripts\python.exe -m pytest
 ```
 
-Current known result: `16 passed`.
+Current known result: `21 passed`.
+
+## Phase 2 Pipeline
+
+Phase 2 adds a PostgreSQL-backed precomputed screener:
+- `app/phase2_db.py` defines PostgreSQL tables for `symbols`, `daily_bars`, `momentum_scores`, `option_scores`, and `refresh_runs`.
+- `app/phase2_refresh.py` is the scheduled/manual Python refresh job.
+- `app/phase2_pipeline.py` converts candles to stored bars and ranks momentum candidates.
+- `app/symbol_source.py` loads symbols from `PHASE2_SYMBOLS` or the Nasdaq Trader symbol directory.
+- FastAPI exposes authenticated read endpoints: `/phase2/candidates` and `/phase2/status`.
+
+Safe refresh knobs:
+- `PHASE2_SYMBOL_SOURCE=configured|nasdaq`
+- `PHASE2_SYMBOLS=NVDA,MSFT,...`
+- `PHASE2_SYMBOL_LIMIT=500`
+- `PHASE2_TOP_N=50`
+- `PHASE2_MARKETDATA_CONCURRENCY=2`
+
+Run the demo job from `app`:
+
+```powershell
+..\.venv\Scripts\python.exe phase2_refresh.py --demo --top 50
+```
+
+Local PostgreSQL:
+- PostgreSQL 17 is installed locally.
+- Service: `postgresql-x64-17`, automatic startup.
+- `psql.exe`: `C:\Program Files\PostgreSQL\17\bin\psql.exe`
+
+Azure PostgreSQL access:
+- `DATABASE_URL` is stored in Key Vault as `database-url` and exposed to the Container App as `DATABASE_URL`.
+- Firewall has an Azure-services rule (`0.0.0.0`) for Container App access.
+- Firewall has a `local-dev` rule for the current local public IP used during setup.
+- Local encrypted admin-password helper is under `.local/` and `.local/` is gitignored. Do not commit it.
+- Latest verified demo refresh wrote Phase 2 candidates successfully; `/phase2/status` reported `succeeded`.
 
 ## Operational Notes
 
@@ -105,6 +146,7 @@ Current known result: `16 passed`.
 - MarketData live calls can hit account credit limits. On August 16, 2026, a rate-limit reset header of `1786973400` decoded to `2026-08-17T13:30:00+00:00`.
 - The frontend now falls back to beta/demo data when live MarketData scanner or discovery requests fail.
 - The dashboard and token-spending endpoints require login. `/health` and static assets remain public.
+- Phase 2 deliberately keeps broad market scans out of the user click path. Use scheduled refreshes and conservative symbol limits to control MarketData credits.
 
 ## Recent Commits
 

@@ -108,3 +108,37 @@ class DiscoveryResponse(BaseModel):
     exclude_earnings: bool
     data_mode: Literal["live", "demo"]
     results: list[DiscoveryCandidate]
+
+
+class Phase2Candidate(BaseModel):
+    symbol: str
+    name: str | None = None
+    exchange: str | None = None
+    sector: str | None = None
+    score: float
+    grade: str
+    setup: str
+    last_close: float
+    factors: dict
+    notes: list[str]
+    scored_at: str
+    options_confirmation_score: float | None = None
+    options_signal: str | None = None
+    call_activity: str | None = None
+    put_call_ratio: float | None = None
+
+
+class Phase2CandidateResponse(BaseModel):
+    count: int
+    limit: int
+    results: list[Phase2Candidate]
+
+
+class Phase2RefreshStatus(BaseModel):
+    id: int
+    started_at: str
+    finished_at: str | None = None
+    status: str
+    symbols_requested: int
+    symbols_scored: int
+    error: str | None = None

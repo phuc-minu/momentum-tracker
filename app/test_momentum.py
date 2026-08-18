@@ -7,7 +7,9 @@ from main import app
 from marketdata import MarketDataCache, MarketDataClient, demo_candles
 from momentum import score_symbol
 from options_activity import analyze_options_activity
+from phase2_pipeline import score_market_candidates
 from schemas import DiscoveryCandidate
+from symbol_source import configured_phase2_symbols
 
 TEST_PASSWORD = "test-password"
 
@@ -135,6 +137,41 @@ def test_live_scan_without_api_key_returns_503(monkeypatch):
 
     assert response.status_code == 503
     assert "MARKETDATA_API_KEY" in response.json()["detail"]
+
+
+def test_phase2_configured_symbols_are_env_driven(monkeypatch):
+    monkeypatch.setenv("PHASE2_SYMBOLS", "sndk, nvda, SNDK")
+
+    symbols = configured_phase2_symbols()
+
+    assert [item["symbol"] for item in symbols] == ["SNDK", "NVDA"]
+
+
+def test_phase2_scores_market_candidates():
+    benchmark = demo_candles("QQQ", 260)
+    candle_map = {
+        "SNDK": demo_candles("SNDK", 260),
+        "NVDA": demo_candles("NVDA", 260),
+        "QQQ": benchmark,
+    }
+
+    scores = score_market_candidates(candle_map, benchmark, top_n=2)
+
+    assert len(scores) == 2
+    assert "QQQ" not in {score.symbol for score in scores}
+    assert scores[0].score >= scores[1].score
+
+
+def test_phase2_candidates_requires_database_url(monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    client = TestClient(app)
+    login(client)
+
+    response = client.get("/phase2/candidates")
+
+    assert response.status_code == 503
+    assert "DATABASE_URL" in response.json()["detail"]
 
 
 def _candidate(symbol: str, *, momentum_score: float, options_confirmation_score: float | None) -> DiscoveryCandidate:

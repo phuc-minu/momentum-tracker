@@ -59,6 +59,10 @@ if ($env:APP_SESSION_SECRET) {
   az keyvault secret set --vault-name $vault --name app-session-secret --value $env:APP_SESSION_SECRET --output none
 }
 
+if ($env:DATABASE_URL) {
+  az keyvault secret set --vault-name $vault --name database-url --value $env:DATABASE_URL --output none
+}
+
 az acr build --registry $acr --image "tech-momentum-ai:$imageTag" --no-logs ./app
 
 $acrLogin = az acr show --name $acr --query loginServer -o tsv
@@ -93,6 +97,11 @@ if ($env:APP_SESSION_SECRET) {
   $appSessionSecretUri = "https://$vault.vault.azure.net/secrets/app-session-secret"
   $secretArgs += "app-session-secret=keyvaultref:$appSessionSecretUri,identityref:$identityId"
   $envArgs += "APP_SESSION_SECRET=secretref:app-session-secret"
+}
+if ($env:DATABASE_URL) {
+  $databaseUrlSecretUri = "https://$vault.vault.azure.net/secrets/database-url"
+  $secretArgs += "database-url=keyvaultref:$databaseUrlSecretUri,identityref:$identityId"
+  $envArgs += "DATABASE_URL=secretref:database-url"
 }
 
 if ($secretArgs.Count -gt 0) {

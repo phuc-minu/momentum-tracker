@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from discover import discover_movers
 from marketdata import MarketDataClient, MarketDataError, demo_candles
 from momentum import score_symbol
-from schemas import DiscoveryResponse, ScanRequest, ScanResponse
+from phase2_db import connect, fetch_latest_refresh_run, fetch_phase2_candidates
+from schemas import DiscoveryResponse, Phase2CandidateResponse, Phase2RefreshStatus, ScanRequest, ScanResponse
 from universe import configured_universe, dedupe_symbols, parse_symbols
 
 app = FastAPI(title="Stock Momentum AI", version="0.1.0")
@@ -165,6 +166,30 @@ async def scan_post(request: ScanRequest, _: None = Depends(require_auth)):
     return await run_scan(request)
 
 
+@app.get("/phase2/candidates", response_model=Phase2CandidateResponse)
+def phase2_candidates(limit: int = Query(default=50, ge=1, le=200), _: None = Depends(require_auth)):
+    try:
+        with connect() as connection:
+            rows = fetch_phase2_candidates(connection, limit=limit)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return {
+        "count": len(rows),
+        "limit": limit,
+        "results": [_serialize_phase2_row(row) for row in rows],
+    }
+
+
+@app.get("/phase2/status", response_model=Phase2RefreshStatus | None)
+def phase2_status(_: None = Depends(require_auth)):
+    try:
+        with connect() as connection:
+            row = fetch_latest_refresh_run(connection)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return _serialize_phase2_row(row) if row else None
+
+
 async def run_scan(request: ScanRequest) -> ScanResponse:
     benchmark = request.benchmark.strip().upper()
     symbols = [symbol for symbol in dedupe_symbols(request.symbols) if symbol != benchmark]
@@ -202,6 +227,17 @@ async def run_scan(request: ScanRequest) -> ScanResponse:
         results=results,
         data_mode=data_mode,
     )
+
+
+def _serialize_phase2_row(row):
+    return {
+        key: value.isoformat() if hasattr(value, "isoformat") else float(value) if _is_decimal(value) else value
+        for key, value in row.items()
+    }
+
+
+def _is_decimal(value) -> bool:
+    return value.__class__.__name__ == "Decimal"
 
 
 async def _fetch_symbols(client: MarketDataClient, symbols: list[str], countback: int):

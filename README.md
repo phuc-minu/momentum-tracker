@@ -57,6 +57,8 @@ $env:DISCOVERY_OPTIONS="true"
 - `GET /health` returns service and API-key configuration status
 - `GET /universe` returns the configured default universe
 - `GET /scan?symbols=NVDA,MSFT&benchmark=QQQ&demo=true` ranks symbols
+- `GET /phase2/candidates` returns precomputed PostgreSQL-backed momentum candidates
+- `GET /phase2/status` returns the latest Phase 2 refresh job status
 - `POST /scan` accepts JSON:
 
 ```json
@@ -67,6 +69,39 @@ $env:DISCOVERY_OPTIONS="true"
   "demo": true
 }
 ```
+
+## Phase 2 precomputed screener
+
+Phase 2 moves broad market discovery out of the click path:
+
+```text
+MarketData daily candles -> PostgreSQL daily_bars -> momentum_scores -> top candidates -> FastAPI reads
+```
+
+Configure PostgreSQL:
+
+```powershell
+$env:DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DBNAME"
+```
+
+Run a safe demo refresh:
+
+```powershell
+cd app
+..\.venv\Scripts\python.exe phase2_refresh.py --demo --top 50
+```
+
+Run a controlled live refresh:
+
+```powershell
+$env:PHASE2_SYMBOL_SOURCE="configured"
+$env:PHASE2_SYMBOLS="NVDA,MSFT,AAPL,AVGO,AMD,META,GOOGL,AMZN,TSLA,SNDK,MU,WDC"
+$env:PHASE2_SYMBOL_LIMIT="200"
+$env:PHASE2_MARKETDATA_CONCURRENCY="2"
+..\.venv\Scripts\python.exe phase2_refresh.py --top 50
+```
+
+For broader scheduled runs, use `PHASE2_SYMBOL_SOURCE=nasdaq`, but keep `PHASE2_SYMBOL_LIMIT` conservative until you understand MarketData credit usage. Options and LLM enrichment should remain downstream-only for the top candidates.
 
 ## Resources
 
