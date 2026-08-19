@@ -1,9 +1,11 @@
 import argparse
 import asyncio
+import json
 import os
 from typing import Any
 
 from marketdata import MarketDataClient, MarketDataError, demo_candles
+from options_activity import analyze_options_activity, demo_options_activity
 from phase2_db import (
     connect,
     create_refresh_run,
@@ -11,6 +13,7 @@ from phase2_db import (
     init_db,
     upsert_daily_bars,
     upsert_momentum_scores,
+    upsert_option_scores,
     upsert_symbols,
 )
 from phase2_pipeline import MIN_AVERAGE_DAILY_VOLUME, candles_to_bars, momentum_signal_to_db, score_market_candidates
@@ -28,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--countback", type=int, default=int(os.getenv("PHASE2_COUNTBACK", "260")))
     parser.add_argument("--benchmark", default=os.getenv("PHASE2_BENCHMARK", "QQQ"))
     parser.add_argument("--concurrency", type=int, default=int(os.getenv("PHASE2_MARKETDATA_CONCURRENCY", "2")))
+    parser.add_argument("--options-concurrency", type=int, default=int(os.getenv("PHASE2_OPTIONS_CONCURRENCY", "2")))
     parser.add_argument("--min-average-volume", type=int, default=int(os.getenv("PHASE2_MIN_AVERAGE_VOLUME", str(MIN_AVERAGE_DAILY_VOLUME))))
     parser.add_argument("--volume-prefilter-days", type=int, default=int(os.getenv("PHASE2_VOLUME_PREFILTER_DAYS", "20")))
     return parser.parse_args()
@@ -76,6 +80,13 @@ async def main() -> None:
                 run_id,
                 [momentum_signal_to_db(score) for score in scores],
             )
+            option_scores = await _score_options(
+                symbols=[score.symbol for score in scores],
+                run_id=run_id,
+                demo=args.demo,
+                concurrency=args.options_concurrency,
+            )
+            upsert_option_scores(connection, run_id, option_scores)
             finish_refresh_run(connection, run_id, status="succeeded", symbols_scored=len(scores))
         except Exception as error:
             connection.rollback()
@@ -149,6 +160,54 @@ async def _fetch_candles(
 
     rows = await asyncio.gather(*(fetch(symbol) for symbol in unique_symbols))
     return {symbol: candles for symbol, candles in rows if candles}
+
+
+async def _score_options(
+    *,
+    symbols: list[str],
+    run_id: int,
+    demo: bool,
+    concurrency: int,
+) -> list[dict[str, Any]]:
+    if demo:
+        return [_option_activity_to_db(symbol, demo_options_activity(symbol)) for symbol in symbols]
+
+    client = MarketDataClient(timeout_seconds=30.0)
+    if not client.api_key:
+        raise MarketDataError("MARKETDATA_API_KEY is required for Phase 2 live options refresh")
+
+    semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
+
+    async def score(symbol: str) -> dict[str, Any]:
+        async with semaphore:
+            try:
+                rows = await client.option_chain(symbol)
+            except MarketDataError:
+                rows = []
+        return _option_activity_to_db(symbol, analyze_options_activity(rows))
+
+    return await asyncio.gather(*(score(symbol) for symbol in symbols))
+
+
+def _option_activity_to_db(symbol: str, activity: dict[str, Any]) -> dict[str, Any]:
+    preferred_contract = activity.get("preferred_contract")
+    return {
+        "symbol": symbol,
+        "put_call_ratio": activity.get("put_call_ratio"),
+        "put_call_source": activity.get("put_call_source", "unavailable"),
+        "call_volume": activity.get("call_volume"),
+        "call_open_interest": activity.get("call_open_interest"),
+        "call_activity_ratio": activity.get("call_activity_ratio"),
+        "call_activity": activity.get("call_activity", "unavailable"),
+        "options_confirmation_score": activity.get("options_confirmation_score"),
+        "options_signal": activity.get("options_signal", "Options unavailable"),
+        "preferred_contract": json.dumps(
+            preferred_contract.model_dump(mode="json") if hasattr(preferred_contract, "model_dump") else preferred_contract,
+            separators=(",", ":"),
+        )
+        if preferred_contract is not None
+        else None,
+    }
 
 
 if __name__ == "__main__":

@@ -223,12 +223,12 @@ async function runDiscover() {
         await runLiveDiscoverFallback(error.message);
       } catch (fallbackError) {
         elements.discoverMeta.textContent = fallbackError.message;
-        elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${fallbackError.message}</td></tr>`;
+        elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${fallbackError.message}</td></tr>`;
         renderModeNotice(`Phase 2 candidates unavailable. ${error.message}`);
       }
     } else {
       elements.discoverMeta.textContent = error.message;
-      elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${error.message}</td></tr>`;
+      elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${error.message}</td></tr>`;
     }
   } finally {
     elements.discoverButton.disabled = false;
@@ -277,24 +277,31 @@ function renderPhase2Discovery(payload) {
   const candidates = payload.results
     .map((item) => phase2ToDiscoveryRow(item, payload.period_days))
     .filter((item) => item.return_2w !== null && item.return_2w >= payload.growth_min)
+    .sort(compareDiscoveryRows)
     .slice(0, payload.limit);
 
   const status = payload.refresh_status;
   const statusText = status?.finished_at ? ` refreshed ${formatDateTime(status.finished_at)}` : "";
   elements.discoverMeta.textContent = `${candidates.length} candidates, PostgreSQL${statusText}`;
   if (!candidates.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No Phase 2 candidates matched this filter</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">No Phase 2 candidates matched this filter</td></tr>`;
     return;
   }
 
   renderDiscoveryRows(candidates);
 }
 
+function compareDiscoveryRows(left, right) {
+  const scoreDelta = right.momentum_score - left.momentum_score;
+  if (scoreDelta !== 0) return scoreDelta;
+  return (right.return_2w ?? Number.NEGATIVE_INFINITY) - (left.return_2w ?? Number.NEGATIVE_INFINITY);
+}
+
 function renderDiscovery(payload) {
   updateGrowthColumnHeader(payload.period_days);
   elements.discoverMeta.textContent = `${payload.count} movers, ${displayMode(payload.data_mode)} mode`;
   if (!payload.results.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No movers matched this filter</td></tr>`;
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">No movers matched this filter</td></tr>`;
     return;
   }
 
@@ -310,8 +317,9 @@ function renderDiscoveryRows(rows) {
           <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
           <td>${formatPrice(item.last_close)}</td>
           <td><strong title="${escapeAttribute(scoreHint(item))}" aria-label="${escapeAttribute(scoreHint(item))}">${item.momentum_score.toFixed(1)}</strong></td>
-          <td><span class="sector-pill">${item.sector || "Unclassified"}</span></td>
+          <td><span class="sector-pill">${item.market_group || item.sector || "Unclassified"}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
+          <td>${formatRsi(item.rsi_14)}</td>
           <td>${formatSignal(item.price_signal)}</td>
           <td>${formatRatio(item.volume_ratio_20d)}</td>
           <td>${formatPutCall(item.put_call_ratio, item.put_call_source)}</td>
@@ -330,20 +338,43 @@ function phase2ToDiscoveryRow(item, periodDays) {
   return {
     symbol: item.symbol,
     sector: item.sector || "Unclassified",
+    market_group: marketGroupLabel(item),
     momentum_score: item.score,
     setup: item.setup,
     price_signal: phase2PriceSignal(factors),
     volume_ratio_20d: factors.volume_ratio_20d_vs_60d,
+    rsi_14: factors.rsi_14,
     return_2w: growth,
     last_close: item.last_close,
     put_call_ratio: item.put_call_ratio,
-    put_call_source: "unavailable",
-    call_volume: null,
+    put_call_source: item.put_call_source || "unavailable",
+    call_volume: item.call_volume,
+    call_open_interest: item.call_open_interest,
+    call_activity_ratio: item.call_activity_ratio,
     call_activity: item.call_activity || "unavailable",
     options_confirmation_score: item.options_confirmation_score,
     options_signal: item.options_signal || "Options unavailable",
     catalyst: "PostgreSQL refresh",
   };
+}
+
+function marketGroupLabel(item) {
+  if (item.sector && item.sector !== "Unclassified") return item.sector;
+  return formatExchange(item.exchange);
+}
+
+function formatExchange(exchange) {
+  const value = String(exchange || "").trim();
+  if (!value || value === "configured") return "Configured";
+  if (value === "demo") return "Demo";
+  if (value === "benchmark") return "Benchmark";
+  if (value === "NASDAQ") return "NASDAQ";
+  if (value === "N") return "NYSE";
+  if (value === "A") return "NYSE American";
+  if (value === "P") return "NYSE Arca";
+  if (value === "Z") return "Cboe BZX";
+  if (value === "V") return "IEX";
+  return value;
 }
 
 function phase2Growth(factors, periodDays) {
@@ -471,6 +502,7 @@ function renderDetail() {
     ["20D High", formatPercent(item.factors.distance_to_20d_high)],
     ["50D SMA", formatPercent(item.factors.distance_to_50d_sma)],
     ["200D SMA", formatPercent(item.factors.distance_to_200d_sma)],
+    ["RSI", formatRsi(item.factors.rsi_14)],
   ]
     .map(([label, value]) => `<div class="factor"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
@@ -538,6 +570,12 @@ function formatRatio(value) {
   return `<span class="${className}">${value.toFixed(2)}x</span>`;
 }
 
+function formatRsi(value) {
+  if (value === null || value === undefined) return "--";
+  const className = value >= 70 ? "negative" : value <= 30 ? "positive" : "";
+  return `<span class="${className}">${Number(value).toFixed(1)}</span>`;
+}
+
 function formatPutCall(value, source) {
   if (value === null || value === undefined) return "--";
   const className = value <= 0.7 ? "positive" : value >= 1.2 ? "negative" : "";
@@ -570,7 +608,8 @@ function scoreHint(item) {
     `Setup: ${item.setup}.`,
     `Signal: ${formatSignal(item.price_signal)}.`,
     `Growth: ${(item.return_2w * 100).toFixed(1)}%.`,
-  ].join(" ");
+    item.rsi_14 !== null && item.rsi_14 !== undefined ? `RSI: ${Number(item.rsi_14).toFixed(1)}.` : "",
+  ].filter(Boolean).join(" ");
 }
 
 function optionsHint(item) {

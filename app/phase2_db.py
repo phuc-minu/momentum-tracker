@@ -223,6 +223,52 @@ def upsert_momentum_scores(connection, run_id: int, scores: list[dict[str, Any]]
     connection.commit()
 
 
+def upsert_option_scores(connection, run_id: int, scores: list[dict[str, Any]]) -> None:
+    if not scores:
+        return
+    values = [
+        (
+            item["symbol"],
+            run_id,
+            item.get("put_call_ratio"),
+            item.get("put_call_source", "unavailable"),
+            item.get("call_volume"),
+            item.get("call_open_interest"),
+            item.get("call_activity_ratio"),
+            item.get("call_activity", "unavailable"),
+            item.get("options_confirmation_score"),
+            item.get("options_signal", "Options unavailable"),
+            item.get("preferred_contract"),
+        )
+        for item in scores
+    ]
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """
+            insert into option_scores (
+              symbol, run_id, put_call_ratio, put_call_source, call_volume, call_open_interest,
+              call_activity_ratio, call_activity, options_confirmation_score, options_signal,
+              preferred_contract
+            )
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            on conflict (symbol) do update set
+              run_id = excluded.run_id,
+              put_call_ratio = excluded.put_call_ratio,
+              put_call_source = excluded.put_call_source,
+              call_volume = excluded.call_volume,
+              call_open_interest = excluded.call_open_interest,
+              call_activity_ratio = excluded.call_activity_ratio,
+              call_activity = excluded.call_activity,
+              options_confirmation_score = excluded.options_confirmation_score,
+              options_signal = excluded.options_signal,
+              preferred_contract = excluded.preferred_contract,
+              scored_at = now()
+            """,
+            values,
+        )
+    connection.commit()
+
+
 def fetch_phase2_candidates(connection, *, limit: int) -> list[dict[str, Any]]:
     with connection.cursor() as cursor:
         rows = cursor.execute(
@@ -241,13 +287,18 @@ def fetch_phase2_candidates(connection, *, limit: int) -> list[dict[str, Any]]:
               m.scored_at,
               o.options_confirmation_score,
               o.options_signal,
+              o.put_call_source,
+              o.call_volume,
+              o.call_open_interest,
+              o.call_activity_ratio,
               o.call_activity,
-              o.put_call_ratio
+              o.put_call_ratio,
+              o.preferred_contract
             from momentum_scores m
             join symbols s on s.symbol = m.symbol
             left join option_scores o on o.symbol = m.symbol
             where s.active = true
-            order by m.score desc, o.options_confirmation_score desc nulls last
+            order by m.score desc, (m.factors->>'return_1m')::numeric desc nulls last
             limit %s
             """,
             (limit,),

@@ -7,7 +7,8 @@ from main import app
 from marketdata import MarketDataCache, MarketDataClient, demo_candles
 from momentum import score_symbol
 from options_activity import analyze_options_activity
-from phase2_refresh import _filter_symbols_by_average_volume
+from phase2_refresh import _filter_symbols_by_average_volume, _option_activity_to_db
+from phase2_db import fetch_phase2_candidates
 from phase2_pipeline import score_market_candidates
 from schemas import Candle, DiscoveryCandidate
 from symbol_source import configured_phase2_symbols, load_phase2_symbols
@@ -28,6 +29,8 @@ def test_score_symbol_returns_rankable_signal():
     assert signal.grade in {"A", "B", "C", "D", "F"}
     assert signal.setup in {"breakout", "pullback", "extended", "base", "weak"}
     assert signal.factors.return_3m is not None
+    assert signal.factors.rsi_14 is not None
+    assert 0 <= signal.factors.rsi_14 <= 100
     assert signal.notes
 
 
@@ -255,6 +258,73 @@ def test_phase2_candidates_requires_database_url(monkeypatch):
 
     assert response.status_code == 503
     assert "DATABASE_URL" in response.json()["detail"]
+
+
+def test_phase2_candidates_sort_by_score_then_growth():
+    class FakeCursor:
+        query = ""
+
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+
+        def fetchall(self):
+            return []
+
+    class FakeConnection:
+        cursor_instance = FakeCursor()
+
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self.cursor_instance
+
+        def __exit__(self, *args):
+            return False
+
+    connection = FakeConnection()
+
+    fetch_phase2_candidates(connection, limit=10)
+
+    assert "order by m.score desc, (m.factors->>'return_1m')::numeric desc nulls last" in connection.cursor_instance.query
+    assert "o.put_call_source" in connection.cursor_instance.query
+    assert "o.call_volume" in connection.cursor_instance.query
+    assert "o.call_activity_ratio" in connection.cursor_instance.query
+
+
+def test_phase2_option_activity_serializes_for_db():
+    activity = analyze_options_activity(
+        [
+            {
+                "optionSymbol": "AMD260828C00200000",
+                "expiration": "2026-08-28",
+                "strike": 200,
+                "side": "call",
+                "volume": 8000,
+                "openInterest": 12000,
+                "delta": 0.7,
+            },
+            {
+                "optionSymbol": "AMD260828P00190000",
+                "expiration": "2026-08-28",
+                "strike": 190,
+                "side": "put",
+                "volume": 2000,
+                "openInterest": 10000,
+                "delta": -0.3,
+            },
+        ]
+    )
+
+    row = _option_activity_to_db("AMD", activity)
+
+    assert row["symbol"] == "AMD"
+    assert row["put_call_ratio"] == 0.25
+    assert row["call_volume"] == 8000
+    assert row["call_activity"] in {"elevated", "unusually elevated"}
+    assert row["options_confirmation_score"] is not None
+    assert "AMD260828C00200000" in row["preferred_contract"]
 
 
 def _candidate(symbol: str, *, momentum_score: float, options_confirmation_score: float | None) -> DiscoveryCandidate:

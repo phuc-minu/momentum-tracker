@@ -26,6 +26,7 @@ def score_symbol(symbol: str, candles: list[Candle], benchmark_candles: list[Can
     sma_200 = _sma(closes, 200)
     volume_20 = _average(volumes[-20:])
     volume_60 = _average(volumes[-60:])
+    rsi_14 = _rsi(closes, 14)
 
     distance_to_20d_high = _ratio(last_close, high_20d) - 1 if high_20d else None
     distance_to_50d_sma = _ratio(last_close, sma_50) - 1 if sma_50 else None
@@ -43,6 +44,7 @@ def score_symbol(symbol: str, candles: list[Candle], benchmark_candles: list[Can
         distance_to_50d_sma=distance_to_50d_sma,
         distance_to_200d_sma=distance_to_200d_sma,
         volume_ratio_20d_vs_60d=volume_ratio,
+        rsi_14=rsi_14,
     )
 
     score = _score(factors)
@@ -109,6 +111,8 @@ def _notes(factors: MomentumFactors, setup: str) -> list[str]:
         notes.append(f"Price is {_percent(factors.distance_to_50d_sma)} from the 50d SMA.")
     if factors.volume_ratio_20d_vs_60d is not None:
         notes.append(f"20d volume is {factors.volume_ratio_20d_vs_60d:.2f}x the 60d average.")
+    if factors.rsi_14 is not None:
+        notes.append(f"14d RSI is {factors.rsi_14:.1f}.")
     return notes
 
 
@@ -128,6 +132,23 @@ def _average(values: list[int]) -> float | None:
     if not values:
         return None
     return fmean(values)
+
+
+def _rsi(values: list[float], periods: int = 14) -> float | None:
+    if len(values) <= periods:
+        return None
+    changes = [
+        values[index] - values[index - 1]
+        for index in range(len(values) - periods, len(values))
+    ]
+    gains = [max(change, 0) for change in changes]
+    losses = [abs(min(change, 0)) for change in changes]
+    average_gain = fmean(gains)
+    average_loss = fmean(losses)
+    if average_loss == 0:
+        return 100.0 if average_gain > 0 else 50.0
+    relative_strength = average_gain / average_loss
+    return round(100 - (100 / (1 + relative_strength)), 1)
 
 
 def _ratio(numerator: float | None, denominator: float | None) -> float | None:

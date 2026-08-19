@@ -106,6 +106,9 @@ Current known result: `21 passed`.
 
 ## Phase 2 Pipeline
 
+Job alias:
+- `db refresh` means run `app/phase2_refresh.py` to refresh Azure PostgreSQL Phase 2 data.
+
 Phase 2 adds a PostgreSQL-backed precomputed screener:
 - `app/phase2_db.py` defines PostgreSQL tables for `symbols`, `daily_bars`, `momentum_scores`, `option_scores`, and `refresh_runs`.
 - `app/phase2_refresh.py` is the scheduled/manual Python refresh job.

@@ -30,6 +30,7 @@ class MomentumFactors(BaseModel):
     distance_to_50d_sma: float | None
     distance_to_200d_sma: float | None
     volume_ratio_20d_vs_60d: float | None
+    rsi_14: float | None
 
 
 class MomentumSignal(BaseModel):
@@ -125,7 +126,12 @@ class Phase2Candidate(BaseModel):
     options_confirmation_score: float | None = None
     options_signal: str | None = None
     call_activity: str | None = None
+    call_volume: int | None = None
+    call_open_interest: int | None = None
+    call_activity_ratio: float | None = None
     put_call_ratio: float | None = None
+    put_call_source: str | None = None
+    preferred_contract: dict | None = None
 
 
 class Phase2CandidateResponse(BaseModel):

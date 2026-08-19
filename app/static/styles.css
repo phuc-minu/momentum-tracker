@@ -408,7 +408,7 @@ table {
 }
 
 .discover-table {
-  min-width: 1490px;
+  min-width: 1560px;
   table-layout: fixed;
   font-size: 12px;
 }
@@ -428,6 +428,7 @@ table {
 }
 
 .discover-table .col-growth,
+.discover-table .col-rsi,
 .discover-table .col-volume,
 .discover-table .col-put-call {
   width: 92px;
