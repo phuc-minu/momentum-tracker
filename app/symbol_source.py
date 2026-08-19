@@ -19,12 +19,12 @@ def configured_phase2_symbols() -> list[dict]:
 def load_phase2_symbols(*, source: str = "configured", limit: int = 500) -> list[dict]:
     if source == "configured":
         return configured_phase2_symbols()[:limit]
-    if source == "nasdaq":
-        return fetch_nasdaq_trader_symbols(limit=limit)
+    if source in {"listed", "nasdaq"}:
+        return fetch_listed_symbols(limit=limit)
     raise ValueError(f"Unsupported PHASE2_SYMBOL_SOURCE: {source}")
 
 
-def fetch_nasdaq_trader_symbols(*, limit: int = 500) -> list[dict]:
+def fetch_listed_symbols(*, limit: int = 500) -> list[dict]:
     symbols = _fetch_nasdaq_listed() + _fetch_other_listed()
     filtered = [
         item

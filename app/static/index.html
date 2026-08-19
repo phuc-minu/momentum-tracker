@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stock Momentum AI</title>
-    <link rel="stylesheet" href="/static/styles.css?v=202608171030" />
+    <link rel="stylesheet" href="/static/styles.css?v=202608191030" />
   </head>
   <body>
     <section id="loginScreen" class="login-screen" hidden>
@@ -48,7 +48,7 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Discovery</p>
-            <h2>2-Week Non-Earnings Movers</h2>
+            <h2>PostgreSQL Momentum Candidates</h2>
           </div>
           <span id="discoverMeta">Ready</span>
         </div>
@@ -66,9 +66,10 @@
           <label class="field">
             <span>Period</span>
             <select id="periodInput">
-              <option value="10" selected>2 weeks</option>
-              <option value="20">1 month</option>
+              <option value="20" selected>1 month</option>
               <option value="60">3 months</option>
+              <option value="126">6 months</option>
+              <option value="252">12 months</option>
             </select>
           </label>
           <label class="field">
@@ -120,7 +121,7 @@
                   <th>Put/Call</th>
                   <th>Calls</th>
                   <th>Options</th>
-                  <th>Catalyst / Setup</th>
+                  <th>Source / Setup</th>
                 </tr>
               </thead>
               <tbody id="discoverBody"></tbody>
@@ -211,6 +212,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=202608171045"></script>
+    <script src="/static/app.js?v=202608191030"></script>
   </body>
 </html>

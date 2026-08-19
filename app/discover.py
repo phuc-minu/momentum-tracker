@@ -23,6 +23,7 @@ CATALYST_TERMS = {
     "crypto": "crypto-linked catalyst",
     "oil": "commodity catalyst",
 }
+MIN_AVERAGE_DAILY_VOLUME = 3_000_000
 
 
 async def discover_movers(
@@ -283,7 +284,7 @@ async def _enrich_live_candidate(
     try:
         candles = await client.candles(candidate.symbol, countback=max(period_days + 5, 260))
     except MarketDataError:
-        return candidate
+        return None
 
     earnings, news = await asyncio.gather(
         _safe_earnings(client, candidate.symbol),
@@ -322,6 +323,8 @@ async def _build_candidate(
     start = candles[-period_days - 1]
     last = candles[-1]
     if start.close <= 0:
+        return None
+    if not _meets_min_average_volume(candles):
         return None
 
     return_2w = last.close / start.close - 1
@@ -441,6 +444,13 @@ def _volume_ratio(candles: list[Candle]) -> float | None:
     if average <= 0:
         return None
     return round(candles[-1].volume / average, 2)
+
+
+def _meets_min_average_volume(candles: list[Candle], days: int = 20) -> bool:
+    if len(candles) < days:
+        return False
+    average = sum(c.volume for c in candles[-days:]) / days
+    return average > MIN_AVERAGE_DAILY_VOLUME
 
 
 def _price_signal(candles: list[Candle]) -> str:

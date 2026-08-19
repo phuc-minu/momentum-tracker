@@ -2,14 +2,15 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from discover import _live_discovery_universe, _sort_discovery_candidates
+from discover import _build_candidate, _live_discovery_universe, _sort_discovery_candidates
 from main import app
 from marketdata import MarketDataCache, MarketDataClient, demo_candles
 from momentum import score_symbol
 from options_activity import analyze_options_activity
+from phase2_refresh import _filter_symbols_by_average_volume
 from phase2_pipeline import score_market_candidates
-from schemas import DiscoveryCandidate
-from symbol_source import configured_phase2_symbols
+from schemas import Candle, DiscoveryCandidate
+from symbol_source import configured_phase2_symbols, load_phase2_symbols
 
 TEST_PASSWORD = "test-password"
 
@@ -53,7 +54,7 @@ def test_dashboard_served_at_root():
 
     assert response.status_code == 200
     assert "Stock Momentum AI" in response.text
-    assert "2-Week Non-Earnings Movers" in response.text
+    assert "PostgreSQL Momentum Candidates" in response.text
     assert "Demo" not in response.text
 
 
@@ -79,6 +80,23 @@ def test_demo_discover_endpoint_returns_movers(monkeypatch):
     assert payload["results"][0]["options_confirmation_score"] is not None
     assert payload["results"][0]["options_signal"] != "Options unavailable"
     assert payload["results"][0]["preferred_contract"] is not None
+
+
+def test_discovery_candidate_requires_average_daily_volume_over_3m():
+    candles = _with_volume(demo_candles("LOWV", 260), 3_000_000)
+
+    candidate = asyncio.run(
+        _build_candidate(
+            "LOWV",
+            "Technology",
+            candles,
+            [],
+            earnings=[],
+            options_activity=None,
+        )
+    )
+
+    assert candidate is None
 
 
 def test_live_discovery_universe_uses_sector_universe_not_sample(monkeypatch):
@@ -147,6 +165,57 @@ def test_phase2_configured_symbols_are_env_driven(monkeypatch):
     assert [item["symbol"] for item in symbols] == ["SNDK", "NVDA"]
 
 
+def test_phase2_listed_source_includes_other_exchanges(monkeypatch):
+    payloads = {
+        "nasdaqlisted": (
+            "Symbol|Security Name|Market Category|Test Issue\n"
+            "MRVL|Marvell Technology, Inc.|Q|N\n"
+            "TEST|Test Issue|Q|Y\n"
+            "File Creation Time: 0819202612:00||||\n"
+        ),
+        "otherlisted": (
+            "ACT Symbol|Security Name|Exchange|Test Issue\n"
+            "IBM|International Business Machines Corporation|N|N\n"
+            "BRK/B|Berkshire Hathaway Inc.|N|N\n"
+            "File Creation Time: 0819202612:00||||\n"
+        ),
+    }
+
+    def fake_download(url):
+        return payloads["nasdaqlisted"] if "nasdaqlisted" in url else payloads["otherlisted"]
+
+    monkeypatch.setattr("symbol_source._download_text", fake_download)
+
+    symbols = load_phase2_symbols(source="listed", limit=10)
+
+    assert [item["symbol"] for item in symbols] == ["MRVL", "IBM"]
+    assert symbols[0]["exchange"] == "NASDAQ"
+    assert symbols[1]["exchange"] == "N"
+
+
+def test_phase2_prefilter_uses_average_daily_volume(monkeypatch):
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.api_key = "test-token"
+
+        async def candles(self, symbol, countback=20):
+            volume = 4_000_000 if symbol == "HIGH" else 3_000_000
+            return _with_volume(demo_candles(symbol, countback), volume)
+
+    monkeypatch.setattr("phase2_refresh.MarketDataClient", FakeClient)
+
+    symbols = asyncio.run(
+        _filter_symbols_by_average_volume(
+            [{"symbol": "HIGH"}, {"symbol": "EDGE"}],
+            min_average_volume=3_000_000,
+            days=20,
+            concurrency=2,
+        )
+    )
+
+    assert [item["symbol"] for item in symbols] == ["HIGH"]
+
+
 def test_phase2_scores_market_candidates():
     benchmark = demo_candles("QQQ", 260)
     candle_map = {
@@ -160,6 +229,20 @@ def test_phase2_scores_market_candidates():
     assert len(scores) == 2
     assert "QQQ" not in {score.symbol for score in scores}
     assert scores[0].score >= scores[1].score
+
+
+def test_phase2_scores_filter_low_average_daily_volume():
+    benchmark = demo_candles("QQQ", 260)
+    candle_map = {
+        "LOWV": _with_volume(demo_candles("LOWV", 260), 1_000_000),
+        "NVDA": demo_candles("NVDA", 260),
+        "QQQ": benchmark,
+    }
+
+    scores = score_market_candidates(candle_map, benchmark, top_n=5)
+
+    assert "LOWV" not in {score.symbol for score in scores}
+    assert "NVDA" in {score.symbol for score in scores}
 
 
 def test_phase2_candidates_requires_database_url(monkeypatch):
@@ -192,6 +275,20 @@ def _candidate(symbol: str, *, momentum_score: float, options_confirmation_score
         likely_earnings_related=False,
         catalyst="price momentum; catalyst not identified",
     )
+
+
+def _with_volume(candles: list[Candle], volume: int) -> list[Candle]:
+    return [
+        Candle(
+            timestamp=candle.timestamp,
+            open=candle.open,
+            high=candle.high,
+            low=candle.low,
+            close=candle.close,
+            volume=volume,
+        )
+        for candle in candles
+    ]
 
 
 def test_marketdata_cache_round_trips_payload(tmp_path):

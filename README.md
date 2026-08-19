@@ -97,11 +97,13 @@ Run a controlled live refresh:
 $env:PHASE2_SYMBOL_SOURCE="configured"
 $env:PHASE2_SYMBOLS="NVDA,MSFT,AAPL,AVGO,AMD,META,GOOGL,AMZN,TSLA,SNDK,MU,WDC"
 $env:PHASE2_SYMBOL_LIMIT="200"
+$env:PHASE2_MIN_AVERAGE_VOLUME="3000000"
+$env:PHASE2_VOLUME_PREFILTER_DAYS="20"
 $env:PHASE2_MARKETDATA_CONCURRENCY="2"
 ..\.venv\Scripts\python.exe phase2_refresh.py --top 50
 ```
 
-For broader scheduled runs, use `PHASE2_SYMBOL_SOURCE=nasdaq`, but keep `PHASE2_SYMBOL_LIMIT` conservative until you understand MarketData credit usage. Options and LLM enrichment should remain downstream-only for the top candidates.
+For broader scheduled runs, use `PHASE2_SYMBOL_SOURCE=listed`. The refresh prefilters that broad list by 20-day average daily volume over `3,000,000` before fetching full historical candles, but keep `PHASE2_SYMBOL_LIMIT` conservative until you understand MarketData credit usage. Options and LLM enrichment should remain downstream-only for the top candidates.
 
 ## Resources
 

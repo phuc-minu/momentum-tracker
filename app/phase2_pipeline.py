@@ -5,6 +5,8 @@ from typing import Any
 from momentum import score_symbol
 from schemas import Candle, MomentumSignal
 
+MIN_AVERAGE_DAILY_VOLUME = 3_000_000
+
 
 def candle_to_bar(symbol: str, candle: Candle) -> dict[str, Any]:
     return {
@@ -32,12 +34,21 @@ def score_market_candidates(
     for symbol, candles in candle_map.items():
         if symbol == "QQQ":
             continue
+        if not _meets_min_average_volume(candles):
+            continue
         try:
             scores.append(score_symbol(symbol, candles, benchmark_candles))
         except ValueError:
             continue
     scores.sort(key=lambda item: item.score, reverse=True)
     return scores[:top_n]
+
+
+def _meets_min_average_volume(candles: list[Candle], days: int = 20) -> bool:
+    if len(candles) < days:
+        return False
+    average = sum(candle.volume for candle in candles[-days:]) / days
+    return average > MIN_AVERAGE_DAILY_VOLUME
 
 
 def momentum_signal_to_db(signal: MomentumSignal) -> dict[str, Any]:

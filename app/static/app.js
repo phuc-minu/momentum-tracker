@@ -211,32 +211,20 @@ async function runScanFallback(reason) {
 
 async function runDiscover() {
   updateGrowthColumnHeader();
-  const params = new URLSearchParams({
-    growth_min: elements.growthInput.value,
-    period_days: elements.periodInput.value,
-    limit: elements.limitInput.value,
-    exclude_earnings: elements.excludeEarningsToggle.checked ? "true" : "false",
-    demo: state.liveDataAvailable ? "false" : "true",
-  });
-
   elements.discoverButton.disabled = true;
-  elements.discoverMeta.textContent = "Discovering";
+  elements.discoverMeta.textContent = "Loading candidates";
 
   try {
-    const response = await fetch(`/discover?${params.toString()}`, { credentials: "same-origin" });
-    const payload = await readJsonResponse(response);
-    requireAuthenticated(response, payload);
-    if (!response.ok) throw new Error(payload.detail || "Discovery failed");
-    renderDiscovery(payload);
+    await runPhase2Discovery();
   } catch (error) {
     if (error instanceof AuthRequiredError) return;
     if (state.liveDataAvailable) {
       try {
-        await runDiscoverFallback(error.message);
+        await runLiveDiscoverFallback(error.message);
       } catch (fallbackError) {
         elements.discoverMeta.textContent = fallbackError.message;
         elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${fallbackError.message}</td></tr>`;
-        renderModeNotice(`Live discovery request failed. ${error.message}`);
+        renderModeNotice(`Phase 2 candidates unavailable. ${error.message}`);
       }
     } else {
       elements.discoverMeta.textContent = error.message;
@@ -247,7 +235,27 @@ async function runDiscover() {
   }
 }
 
-async function runDiscoverFallback(reason) {
+async function runPhase2Discovery() {
+  const limit = Number(elements.limitInput.value);
+  const response = await fetch("/phase2/candidates?limit=200", { credentials: "same-origin" });
+  const payload = await readJsonResponse(response);
+  requireAuthenticated(response, payload);
+  if (!response.ok) throw new Error(payload.detail || "Phase 2 candidates unavailable");
+
+  const statusResponse = await fetch("/phase2/status", { credentials: "same-origin" });
+  const statusPayload = await readJsonResponse(statusResponse);
+  requireAuthenticated(statusResponse, statusPayload);
+
+  renderPhase2Discovery({
+    ...payload,
+    limit,
+    period_days: Number(elements.periodInput.value),
+    growth_min: Number(elements.growthInput.value),
+    refresh_status: statusResponse.ok ? statusPayload : null,
+  });
+}
+
+async function runLiveDiscoverFallback(reason) {
   updateGrowthColumnHeader();
   const params = new URLSearchParams({
     growth_min: elements.growthInput.value,
@@ -261,7 +269,25 @@ async function runDiscoverFallback(reason) {
   requireAuthenticated(response, payload);
   if (!response.ok) throw new Error(payload.detail || reason);
   renderDiscovery(payload);
-  renderModeNotice(`Live data request failed. Showing beta data. ${reason}`);
+  renderModeNotice(`Phase 2 candidates unavailable. Showing live fallback. ${reason}`);
+}
+
+function renderPhase2Discovery(payload) {
+  updateGrowthColumnHeader(payload.period_days);
+  const candidates = payload.results
+    .map((item) => phase2ToDiscoveryRow(item, payload.period_days))
+    .filter((item) => item.return_2w !== null && item.return_2w >= payload.growth_min)
+    .slice(0, payload.limit);
+
+  const status = payload.refresh_status;
+  const statusText = status?.finished_at ? ` refreshed ${formatDateTime(status.finished_at)}` : "";
+  elements.discoverMeta.textContent = `${candidates.length} candidates, PostgreSQL${statusText}`;
+  if (!candidates.length) {
+    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">No Phase 2 candidates matched this filter</td></tr>`;
+    return;
+  }
+
+  renderDiscoveryRows(candidates);
 }
 
 function renderDiscovery(payload) {
@@ -272,7 +298,11 @@ function renderDiscovery(payload) {
     return;
   }
 
-  elements.discoverBody.innerHTML = payload.results
+  renderDiscoveryRows(payload.results);
+}
+
+function renderDiscoveryRows(rows) {
+  elements.discoverBody.innerHTML = rows
     .map((item, index) => {
       return `
         <tr>
@@ -280,7 +310,7 @@ function renderDiscovery(payload) {
           <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
           <td>${formatPrice(item.last_close)}</td>
           <td><strong title="${escapeAttribute(scoreHint(item))}" aria-label="${escapeAttribute(scoreHint(item))}">${item.momentum_score.toFixed(1)}</strong></td>
-          <td><span class="sector-pill">${item.sector}</span></td>
+          <td><span class="sector-pill">${item.sector || "Unclassified"}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
           <td>${formatSignal(item.price_signal)}</td>
           <td>${formatRatio(item.volume_ratio_20d)}</td>
@@ -292,6 +322,42 @@ function renderDiscovery(payload) {
       `;
     })
     .join("");
+}
+
+function phase2ToDiscoveryRow(item, periodDays) {
+  const factors = item.factors || {};
+  const growth = phase2Growth(factors, periodDays);
+  return {
+    symbol: item.symbol,
+    sector: item.sector || "Unclassified",
+    momentum_score: item.score,
+    setup: item.setup,
+    price_signal: phase2PriceSignal(factors),
+    volume_ratio_20d: factors.volume_ratio_20d_vs_60d,
+    return_2w: growth,
+    last_close: item.last_close,
+    put_call_ratio: item.put_call_ratio,
+    put_call_source: "unavailable",
+    call_volume: null,
+    call_activity: item.call_activity || "unavailable",
+    options_confirmation_score: item.options_confirmation_score,
+    options_signal: item.options_signal || "Options unavailable",
+    catalyst: "PostgreSQL refresh",
+  };
+}
+
+function phase2Growth(factors, periodDays) {
+  if (periodDays === 60) return factors.return_3m;
+  if (periodDays === 126) return factors.return_6m;
+  if (periodDays === 252) return factors.return_12m;
+  return factors.return_1m;
+}
+
+function phase2PriceSignal(factors) {
+  if (factors.distance_to_20d_high !== null && factors.distance_to_20d_high !== undefined && factors.distance_to_20d_high >= -0.005) {
+    return "new 20-day high";
+  }
+  return "momentum continuation";
 }
 
 function updateGrowthColumnHeader(periodDays = Number(elements.periodInput.value)) {
@@ -339,7 +405,7 @@ function renderModeNotice(message) {
     return;
   }
   if (state.liveDataAvailable) {
-    elements.modeNotice.textContent = "Live MarketData mode: price growth and options activity are calculated from provider data.";
+    elements.modeNotice.textContent = "Phase 2 mode: discovery reads precomputed PostgreSQL candidates; manual scanner still uses live MarketData.";
     elements.modeNotice.className = "mode-notice live";
   } else {
     elements.modeNotice.textContent = "Beta data mode: live MarketData is not configured yet, so displayed growth and options values are generated preview data.";
@@ -475,8 +541,8 @@ function formatRatio(value) {
 function formatPutCall(value, source) {
   if (value === null || value === undefined) return "--";
   const className = value <= 0.7 ? "positive" : value >= 1.2 ? "negative" : "";
-  const label = source === "open_interest" ? "OI" : source === "demo" ? "beta" : "vol";
-  return `<span class="${className}">${value.toFixed(2)}</span> <span class="subtle">${label}</span>`;
+  const label = source === "open_interest" ? "OI" : source === "demo" ? "beta" : source === "volume" ? "vol" : "";
+  return `<span class="${className}">${value.toFixed(2)}</span>${label ? ` <span class="subtle">${label}</span>` : ""}`;
 }
 
 function displayMode(mode) {
@@ -534,6 +600,17 @@ function compactNumber(value) {
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
   if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
   return String(value);
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function yahooFinanceUrl(symbol) {

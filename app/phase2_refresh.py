@@ -13,7 +13,8 @@ from phase2_db import (
     upsert_momentum_scores,
     upsert_symbols,
 )
-from phase2_pipeline import candles_to_bars, momentum_signal_to_db, score_market_candidates
+from phase2_pipeline import MIN_AVERAGE_DAILY_VOLUME, candles_to_bars, momentum_signal_to_db, score_market_candidates
+from phase2_pipeline import phase2_symbol
 from symbol_source import load_phase2_symbols
 from universe import configured_universe
 
@@ -21,12 +22,14 @@ from universe import configured_universe
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh precomputed Phase 2 momentum candidates.")
     parser.add_argument("--demo", action="store_true", help="Use generated candles instead of MarketData.")
-    parser.add_argument("--source", default=os.getenv("PHASE2_SYMBOL_SOURCE", "configured"), choices=["configured", "nasdaq"])
+    parser.add_argument("--source", default=os.getenv("PHASE2_SYMBOL_SOURCE", "configured"), choices=["configured", "listed", "nasdaq"])
     parser.add_argument("--symbol-limit", type=int, default=int(os.getenv("PHASE2_SYMBOL_LIMIT", "500")))
     parser.add_argument("--top", type=int, default=int(os.getenv("PHASE2_TOP_N", "50")))
     parser.add_argument("--countback", type=int, default=int(os.getenv("PHASE2_COUNTBACK", "260")))
     parser.add_argument("--benchmark", default=os.getenv("PHASE2_BENCHMARK", "QQQ"))
     parser.add_argument("--concurrency", type=int, default=int(os.getenv("PHASE2_MARKETDATA_CONCURRENCY", "2")))
+    parser.add_argument("--min-average-volume", type=int, default=int(os.getenv("PHASE2_MIN_AVERAGE_VOLUME", str(MIN_AVERAGE_DAILY_VOLUME))))
+    parser.add_argument("--volume-prefilter-days", type=int, default=int(os.getenv("PHASE2_VOLUME_PREFILTER_DAYS", "20")))
     return parser.parse_args()
 
 
@@ -34,17 +37,17 @@ async def main() -> None:
     args = parse_args()
     symbols = _load_symbols(args)
     if not symbols:
-        raise SystemExit("No symbols configured. Set PHASE2_SYMBOLS or use --source nasdaq.")
+        raise SystemExit("No symbols configured. Set PHASE2_SYMBOLS or use --source listed.")
+    if not args.demo and args.min_average_volume > 0:
+        symbols = await _filter_symbols_by_average_volume(
+            symbols,
+            min_average_volume=args.min_average_volume,
+            days=args.volume_prefilter_days,
+            concurrency=args.concurrency,
+        )
     benchmark = args.benchmark.strip().upper()
     if benchmark not in {item["symbol"] for item in symbols}:
-        symbols.append(
-            {
-                "symbol": benchmark,
-                "name": benchmark,
-                "exchange": "benchmark",
-                "sector": "Benchmark",
-            }
-        )
+        symbols.append(phase2_symbol(benchmark, name=benchmark, exchange="benchmark", sector="Benchmark"))
 
     with connect() as connection:
         init_db(connection)
@@ -83,11 +86,40 @@ async def main() -> None:
 def _load_symbols(args: argparse.Namespace) -> list[dict[str, Any]]:
     if args.demo and args.source == "configured" and not os.getenv("PHASE2_SYMBOLS"):
         return [
-            {"symbol": symbol, "name": symbol, "exchange": "demo", "sector": "Unclassified"}
+            phase2_symbol(symbol, name=symbol, exchange="demo")
             for symbol in configured_universe()
             if symbol != args.benchmark.strip().upper()
         ][: args.symbol_limit]
     return load_phase2_symbols(source=args.source, limit=args.symbol_limit)
+
+
+async def _filter_symbols_by_average_volume(
+    symbols: list[dict[str, Any]],
+    *,
+    min_average_volume: int,
+    days: int,
+    concurrency: int,
+) -> list[dict[str, Any]]:
+    client = MarketDataClient(timeout_seconds=30.0)
+    if not client.api_key:
+        raise MarketDataError("MARKETDATA_API_KEY is required for Phase 2 live refresh")
+
+    semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
+
+    async def passes_volume_filter(item: dict[str, Any]) -> dict[str, Any] | None:
+        symbol = item["symbol"]
+        async with semaphore:
+            try:
+                candles = await client.candles(symbol, countback=days)
+            except MarketDataError:
+                return None
+        if len(candles) < days:
+            return None
+        average_volume = sum(candle.volume for candle in candles[-days:]) / days
+        return item if average_volume > min_average_volume else None
+
+    rows = await asyncio.gather(*(passes_volume_filter(item) for item in symbols))
+    return [item for item in rows if item]
 
 
 async def _fetch_candles(
