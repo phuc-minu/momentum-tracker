@@ -269,6 +269,19 @@ def upsert_option_scores(connection, run_id: int, scores: list[dict[str, Any]]) 
     connection.commit()
 
 
+def prune_scores_for_run(connection, run_id: int) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "delete from option_scores where run_id is distinct from %s",
+            (run_id,),
+        )
+        cursor.execute(
+            "delete from momentum_scores where run_id is distinct from %s",
+            (run_id,),
+        )
+    connection.commit()
+
+
 def fetch_phase2_candidates(connection, *, limit: int) -> list[dict[str, Any]]:
     with connection.cursor() as cursor:
         rows = cursor.execute(

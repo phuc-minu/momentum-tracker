@@ -28,12 +28,12 @@ def load_phase2_symbols(*, source: str = "configured", limit: int = 500) -> list
     raise ValueError(f"Unsupported PHASE2_SYMBOL_SOURCE: {source}")
 
 
-def fetch_fmp_screener_symbols(*, limit: int = 500) -> list[dict]:
+def fetch_fmp_screener_symbols(*, limit: int = 500, min_average_volume: int | None = None) -> list[dict]:
     api_key = os.getenv("FMP_API_KEY") or os.getenv("MARKETDATA_API_KEY")
     if not api_key:
         raise RuntimeError("FMP_API_KEY is required for PHASE2_SYMBOL_SOURCE=fmp")
     params = {
-        "volumeMoreThan": os.getenv("PHASE2_MIN_AVERAGE_VOLUME", "3000000"),
+        "volumeMoreThan": str(min_average_volume or os.getenv("PHASE2_MIN_AVERAGE_VOLUME", "3000000")),
         "isActivelyTrading": "true",
         "isEtf": "false",
         "country": os.getenv("FMP_SCREENER_COUNTRY", "US"),
@@ -41,7 +41,7 @@ def fetch_fmp_screener_symbols(*, limit: int = 500) -> list[dict]:
         "apikey": api_key,
     }
     base_url = os.getenv("FMP_BASE_URL", FMP_BASE_URL).rstrip("/") + "/"
-    rows = _json_rows(_download_text(f"{base_url}stock-screener?{urlencode(params)}"))
+    rows = _json_rows(_download_text(f"{base_url}company-screener?{urlencode(params)}"))
     symbols = []
     for row in rows:
         symbol = str(row.get("symbol", "")).strip().upper()

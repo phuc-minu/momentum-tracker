@@ -11,6 +11,7 @@ from phase2_db import (
     create_refresh_run,
     finish_refresh_run,
     init_db,
+    prune_scores_for_run,
     upsert_daily_bars,
     upsert_momentum_scores,
     upsert_option_scores,
@@ -25,7 +26,7 @@ from universe import configured_universe
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh precomputed Phase 2 momentum candidates.")
     parser.add_argument("--demo", action="store_true", help="Use generated candles instead of FMP.")
-    parser.add_argument("--source", default=os.getenv("PHASE2_SYMBOL_SOURCE", "configured"), choices=["configured", "listed", "nasdaq", "fmp"])
+    parser.add_argument("--source", default=os.getenv("PHASE2_SYMBOL_SOURCE", "fmp"), choices=["configured", "listed", "nasdaq", "fmp"])
     parser.add_argument("--symbol-limit", type=int, default=int(os.getenv("PHASE2_SYMBOL_LIMIT", "500")))
     parser.add_argument("--top", type=int, default=int(os.getenv("PHASE2_TOP_N", "50")))
     parser.add_argument("--countback", type=int, default=int(os.getenv("PHASE2_COUNTBACK", "260")))
@@ -89,6 +90,7 @@ async def main() -> None:
                 concurrency=args.options_concurrency,
             )
             upsert_option_scores(connection, run_id, option_scores)
+            prune_scores_for_run(connection, run_id)
             finish_refresh_run(connection, run_id, status="succeeded", symbols_scored=len(scores))
         except Exception as error:
             connection.rollback()

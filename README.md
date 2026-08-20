@@ -90,7 +90,7 @@ cd app
 Run a controlled live refresh:
 
 ```powershell
-$env:PHASE2_SYMBOL_SOURCE="configured"
+$env:PHASE2_SYMBOL_SOURCE="fmp"
 $env:PHASE2_SYMBOLS="NVDA,MSFT,AAPL,AVGO,AMD,META,GOOGL,AMZN,TSLA,SNDK,MU,WDC"
 $env:PHASE2_SYMBOL_LIMIT="200"
 $env:PHASE2_MIN_AVERAGE_VOLUME="3000000"
@@ -99,7 +99,7 @@ $env:PHASE2_FMP_CONCURRENCY="2"
 ..\.venv\Scripts\python.exe phase2_refresh.py --top 50
 ```
 
-For broader scheduled runs, use `PHASE2_SYMBOL_SOURCE=fmp` to start from the FMP stock screener filtered by volume, or `PHASE2_SYMBOL_SOURCE=listed` to use Nasdaq Trader symbol files. The refresh also prefilters by 20-day average daily volume over `3,000,000` before fetching full historical candles, but keep `PHASE2_SYMBOL_LIMIT` conservative until you understand FMP usage. Options and LLM enrichment should remain downstream-only for the top candidates.
+Discovery mode and broader scheduled refreshes use `PHASE2_SYMBOL_SOURCE=fmp` by default to start from the FMP `company-screener` endpoint filtered by volume. Use `DISCOVERY_SYMBOL_LIMIT` / `PHASE2_SYMBOL_LIMIT` to cap the request size and `DISCOVERY_MIN_AVERAGE_VOLUME` / `PHASE2_MIN_AVERAGE_VOLUME` to control the liquidity filter. Use `DISCOVERY_SYMBOL_SOURCE=static` only as a local fallback. Options and LLM enrichment should remain downstream-only for the top candidates.
 
 ## Resources
 

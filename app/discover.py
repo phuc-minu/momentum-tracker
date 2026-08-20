@@ -7,6 +7,7 @@ from datetime import timedelta
 from marketdata import MarketDataClient, MarketDataError, demo_candles
 from options_activity import analyze_options_activity, demo_options_activity
 from schemas import Candle, DiscoveryCandidate, NewsItem
+from symbol_source import fetch_fmp_screener_symbols
 from universe import discovery_universe
 
 EARNINGS_TERMS = ("earnings", "eps", "quarter", "q1", "q2", "q3", "q4", "guidance", "revenue", "profit")
@@ -34,8 +35,8 @@ async def discover_movers(
     exclude_earnings: bool = True,
     demo: bool = False,
 ) -> list[DiscoveryCandidate]:
-    universe = _live_discovery_universe() if not demo else discovery_universe()
     if demo:
+        universe = discovery_universe()
         candidates = [
             await _build_candidate(
                 symbol,
@@ -52,6 +53,7 @@ async def discover_movers(
         client = MarketDataClient(timeout_seconds=30.0)
         if not client.api_key:
             raise MarketDataError("FMP_API_KEY is required for live market data")
+        universe = _live_discovery_universe()
         candidates = await _discover_live_candidates(
             client,
             universe,
@@ -238,7 +240,29 @@ async def _gather_limited(coroutines, *, limit: int):
 
 
 def _live_discovery_universe() -> dict[str, str]:
-    return discovery_universe()
+    source = os.getenv("DISCOVERY_SYMBOL_SOURCE", "fmp").strip().lower()
+    if source == "static":
+        return discovery_universe()
+    if source != "fmp":
+        raise MarketDataError(f"Unsupported DISCOVERY_SYMBOL_SOURCE: {source}")
+    try:
+        limit = int(os.getenv("DISCOVERY_SYMBOL_LIMIT", os.getenv("PHASE2_SYMBOL_LIMIT", "500")))
+    except ValueError:
+        limit = 500
+    try:
+        min_volume = int(os.getenv("DISCOVERY_MIN_AVERAGE_VOLUME", os.getenv("PHASE2_MIN_AVERAGE_VOLUME", "3000000")))
+    except ValueError:
+        min_volume = MIN_AVERAGE_DAILY_VOLUME
+    try:
+        symbols = fetch_fmp_screener_symbols(limit=limit, min_average_volume=min_volume)
+    except RuntimeError as error:
+        raise MarketDataError(str(error)) from error
+    if not symbols:
+        raise MarketDataError("FMP stock screener returned no discovery symbols")
+    return {
+        item["symbol"]: item.get("sector") or "Unclassified"
+        for item in symbols
+    }
 
 
 def _live_request_concurrency() -> int:

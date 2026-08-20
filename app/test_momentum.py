@@ -8,7 +8,7 @@ from marketdata import MarketDataCache, MarketDataClient, MarketDataError, demo_
 from momentum import score_symbol
 from options_activity import analyze_options_activity
 from phase2_refresh import _filter_symbols_by_average_volume, _option_activity_to_db
-from phase2_db import fetch_phase2_candidates
+from phase2_db import fetch_phase2_candidates, prune_scores_for_run
 from phase2_pipeline import score_market_candidates
 from schemas import Candle, DiscoveryCandidate
 from symbol_source import configured_phase2_symbols, load_phase2_symbols
@@ -102,8 +102,26 @@ def test_discovery_candidate_requires_average_daily_volume_over_3m():
     assert candidate is None
 
 
-def test_live_discovery_universe_uses_sector_universe_not_sample(monkeypatch):
-    monkeypatch.delenv("DISCOVERY_UNIVERSE", raising=False)
+def test_live_discovery_universe_uses_fmp_screener(monkeypatch):
+    def fake_screener(*, limit=500, min_average_volume=None):
+        assert limit == 25
+        assert min_average_volume == 3_000_000
+        return [
+            {"symbol": "MRVL", "sector": "Technology"},
+            {"symbol": "IBM", "sector": "Technology"},
+        ]
+
+    monkeypatch.setenv("DISCOVERY_SYMBOL_LIMIT", "25")
+    monkeypatch.setenv("DISCOVERY_MIN_AVERAGE_VOLUME", "3000000")
+    monkeypatch.setattr("discover.fetch_fmp_screener_symbols", fake_screener)
+
+    universe = _live_discovery_universe()
+
+    assert universe == {"MRVL": "Technology", "IBM": "Technology"}
+
+
+def test_live_discovery_universe_can_use_static_fallback(monkeypatch):
+    monkeypatch.setenv("DISCOVERY_SYMBOL_SOURCE", "static")
 
     universe = _live_discovery_universe()
 
@@ -337,6 +355,41 @@ def test_phase2_candidates_sort_by_score_then_growth():
     assert "o.put_call_source" in connection.cursor_instance.query
     assert "o.call_volume" in connection.cursor_instance.query
     assert "o.call_activity_ratio" in connection.cursor_instance.query
+
+
+def test_phase2_refresh_prunes_stale_scores():
+    class FakeCursor:
+        queries = []
+
+        def execute(self, query, params=None):
+            self.queries.append((query, params))
+            return self
+
+    class FakeConnection:
+        cursor_instance = FakeCursor()
+        committed = False
+
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self.cursor_instance
+
+        def __exit__(self, *args):
+            return False
+
+        def commit(self):
+            self.committed = True
+
+    connection = FakeConnection()
+
+    prune_scores_for_run(connection, 7)
+
+    assert connection.committed is True
+    assert "delete from option_scores where run_id is distinct from %s" in connection.cursor_instance.queries[0][0]
+    assert "delete from momentum_scores where run_id is distinct from %s" in connection.cursor_instance.queries[1][0]
+    assert connection.cursor_instance.queries[0][1] == (7,)
+    assert connection.cursor_instance.queries[1][1] == (7,)
 
 
 def test_phase2_option_activity_serializes_for_db():

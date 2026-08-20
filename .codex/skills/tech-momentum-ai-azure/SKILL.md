@@ -119,7 +119,10 @@ Phase 2 adds a PostgreSQL-backed precomputed screener:
 - FastAPI exposes authenticated read endpoints: `/phase2/candidates` and `/phase2/status`.
 
 Safe refresh knobs:
-- `PHASE2_SYMBOL_SOURCE=configured|nasdaq`
+- `PHASE2_SYMBOL_SOURCE=fmp|configured|listed|nasdaq`
+- `DISCOVERY_SYMBOL_SOURCE=fmp|static`
+- `DISCOVERY_SYMBOL_LIMIT=500`
+- `DISCOVERY_MIN_AVERAGE_VOLUME=3000000`
 - `PHASE2_SYMBOLS=NVDA,MSFT,...`
 - `PHASE2_SYMBOL_LIMIT=500`
 - `PHASE2_TOP_N=50`
@@ -148,7 +151,7 @@ Azure PostgreSQL access:
 - Azure CLI may require sandbox escalation because it reads `C:\Users\phuct\.azure\azureProfile.json`.
 - Git may warn about denied access to `C:\Users\phuct\.config\git\ignore`; this warning has not blocked commits or pushes.
 - `gh` CLI was not installed as of August 16, 2026. Use normal `git` for commit/push unless GitHub PR automation is specifically needed.
-- FMP is the current market data provider. Use `FMP_API_KEY` with base URL `https://financialmodelingprep.com/stable/`.
+- FMP is the current market data provider. Use `FMP_API_KEY` with base URL `https://financialmodelingprep.com/stable/`. Live Discovery and Phase 2 refresh default to FMP `company-screener` for symbol selection.
 - The frontend now falls back to beta/demo data when live FMP scanner or discovery requests fail.
 - The dashboard and token-spending endpoints require login. `/health` and static assets remain public.
 - Phase 2 deliberately keeps broad market scans out of the user click path. Use scheduled refreshes and conservative symbol limits to control FMP usage.
