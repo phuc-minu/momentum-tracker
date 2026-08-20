@@ -132,5 +132,6 @@ output acrName string = acr.name
 output acrLoginServer string = acr.properties.loginServer
 output keyVaultName string = kv.name
 output identityId string = identity.id
+output containerAppsEnvironmentId string = env.id
 output containerAppName string = app.name
 output containerAppFqdn string = app.properties.configuration.ingress.fqdn

@@ -99,6 +99,8 @@ $env:PHASE2_FMP_CONCURRENCY="2"
 ..\.venv\Scripts\python.exe phase2_refresh.py --top 50
 ```
 
+Azure runs the same `db refresh` job automatically at `22:30 UTC` Monday through Friday using the `momentumai-db-refresh` Container Apps Job. Scheduled-job cron expressions use UTC. The deployment script creates or updates the job whenever the required `database-url` and `fmp-api-key` Key Vault secrets are available. Discovery defaults to stocks priced above `$10` through `PHASE2_MIN_PRICE=10`.
+
 Discovery mode and broader scheduled refreshes use `PHASE2_SYMBOL_SOURCE=fmp` by default to start from the FMP `company-screener` endpoint filtered by volume. Use `DISCOVERY_SYMBOL_LIMIT` / `PHASE2_SYMBOL_LIMIT` to cap the request size and `DISCOVERY_MIN_AVERAGE_VOLUME` / `PHASE2_MIN_AVERAGE_VOLUME` to control the liquidity filter. Use `DISCOVERY_SYMBOL_SOURCE=static` only as a local fallback. Options and LLM enrichment should remain downstream-only for the top candidates.
 
 ## Resources

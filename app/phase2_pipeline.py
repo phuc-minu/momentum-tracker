@@ -6,6 +6,7 @@ from momentum import score_symbol
 from schemas import Candle, MomentumSignal
 
 MIN_AVERAGE_DAILY_VOLUME = 3_000_000
+MIN_STOCK_PRICE = 10.0
 
 
 def candle_to_bar(symbol: str, candle: Candle) -> dict[str, Any]:
@@ -30,11 +31,14 @@ def score_market_candidates(
     *,
     top_n: int = 50,
     benchmark_symbol: str = "",
+    min_price: float = MIN_STOCK_PRICE,
 ) -> list[MomentumSignal]:
     benchmark_symbol = benchmark_symbol.strip().upper()
     scores: list[MomentumSignal] = []
     for symbol, candles in candle_map.items():
         if benchmark_symbol and symbol == benchmark_symbol:
+            continue
+        if not candles or candles[-1].close <= min_price:
             continue
         if not _meets_min_average_volume(candles):
             continue

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from datetime import timedelta
 
 from marketdata import MarketDataClient, MarketDataError, demo_candles
+from momentum import adjusted_momentum_score
 from options_activity import analyze_options_activity, demo_options_activity
 from schemas import Candle, DiscoveryCandidate, NewsItem
 from symbol_source import fetch_fmp_screener_symbols
@@ -25,6 +26,7 @@ CATALYST_TERMS = {
     "oil": "commodity catalyst",
 }
 MIN_AVERAGE_DAILY_VOLUME = 3_000_000
+MIN_STOCK_PRICE = 10.0
 
 
 async def discover_movers(
@@ -184,7 +186,7 @@ def _build_candidate_from_candle_pair(
     return_2w = last.close / start.close - 1
     price_signal = "new 20-day high" if last.close >= start.close else "momentum continuation"
     setup = _setup_label(return_2w, price_signal, None)
-    momentum_score = _momentum_score(return_2w, price_signal, None, None)
+    momentum_score = _momentum_score(return_2w, price_signal, None, None, None)
 
     return DiscoveryCandidate(
         symbol=symbol,
@@ -197,6 +199,7 @@ def _build_candidate_from_candle_pair(
         return_2w=round(return_2w, 4),
         start_close=round(start.close, 2),
         last_close=round(last.close, 2),
+        rsi_14=None,
         put_call_ratio=None,
         put_call_source="unavailable",
         call_volume=None,
@@ -254,7 +257,11 @@ def _live_discovery_universe() -> dict[str, str]:
     except ValueError:
         min_volume = MIN_AVERAGE_DAILY_VOLUME
     try:
-        symbols = fetch_fmp_screener_symbols(limit=limit, min_average_volume=min_volume)
+        min_price = float(os.getenv("DISCOVERY_MIN_PRICE", os.getenv("PHASE2_MIN_PRICE", "10")))
+    except ValueError:
+        min_price = MIN_STOCK_PRICE
+    try:
+        symbols = fetch_fmp_screener_symbols(limit=limit, min_average_volume=min_volume, min_price=min_price)
     except RuntimeError as error:
         raise MarketDataError(str(error)) from error
     if not symbols:
@@ -344,14 +351,21 @@ async def _build_candidate(
     last = candles[-1]
     if start.close <= 0:
         return None
+    try:
+        min_price = float(os.getenv("DISCOVERY_MIN_PRICE", os.getenv("PHASE2_MIN_PRICE", str(MIN_STOCK_PRICE))))
+    except ValueError:
+        min_price = MIN_STOCK_PRICE
+    if last.close <= min_price:
+        return None
     if not _meets_min_average_volume(candles):
         return None
 
     return_2w = last.close / start.close - 1
     volume_ratio = _volume_ratio(candles)
+    rsi_14 = _rsi([candle.close for candle in candles], 14)
     price_signal = _price_signal(candles)
     setup = _setup_label(return_2w, price_signal, volume_ratio)
-    momentum_score = _momentum_score(return_2w, price_signal, volume_ratio, options_activity)
+    momentum_score = _momentum_score(return_2w, price_signal, volume_ratio, options_activity, rsi_14)
     headlines = news if news is not None else _demo_news(symbol)
     earnings_near_move = _earnings_near_move(earnings or [], start.timestamp, last.timestamp)
     headline_related = _headlines_look_earnings_related(headlines)
@@ -369,6 +383,7 @@ async def _build_candidate(
         return_2w=round(return_2w, 4),
         start_close=round(start.close, 2),
         last_close=round(last.close, 2),
+        rsi_14=rsi_14,
         put_call_ratio=(options_activity or {}).get("put_call_ratio"),
         put_call_source=(options_activity or {}).get("put_call_source", "unavailable"),
         call_volume=(options_activity or {}).get("call_volume"),
@@ -458,9 +473,9 @@ def _classify_catalyst(headlines: list[NewsItem], earnings_related: bool, demo: 
 
 
 def _volume_ratio(candles: list[Candle]) -> float | None:
-    if len(candles) < 20:
+    if len(candles) < 21:
         return None
-    average = sum(c.volume for c in candles[-20:]) / 20
+    average = sum(c.volume for c in candles[-21:-1]) / 20
     if average <= 0:
         return None
     return round(candles[-1].volume / average, 2)
@@ -498,19 +513,36 @@ def _momentum_score(
     price_signal: str,
     volume_ratio: float | None,
     options_activity: dict | None,
+    rsi_14: float | None,
 ) -> float:
     score = 55 + min(return_2w * 120, 28)
     if "50-day high" in price_signal:
         score += 8
     elif "20-day high" in price_signal:
         score += 5
-    if volume_ratio is not None:
-        score += min(max((volume_ratio - 1) * 8, 0), 8)
-    if (options_activity or {}).get("call_activity") == "unusually elevated":
-        score += 6
-    elif (options_activity or {}).get("call_activity") == "elevated":
-        score += 3
-    return round(min(score, 99), 1)
+    return adjusted_momentum_score(
+        min(score, 94),
+        rsi_14=rsi_14,
+        call_activity=(options_activity or {}).get("call_activity"),
+        current_volume_ratio_20d=volume_ratio,
+    )
+
+
+def _rsi(values: list[float], periods: int = 14) -> float | None:
+    if len(values) <= periods:
+        return None
+    changes = [
+        values[index] - values[index - 1]
+        for index in range(len(values) - periods, len(values))
+    ]
+    gains = [max(change, 0) for change in changes]
+    losses = [abs(min(change, 0)) for change in changes]
+    average_gain = sum(gains) / len(gains)
+    average_loss = sum(losses) / len(losses)
+    if average_loss == 0:
+        return 100.0 if average_gain > 0 else 50.0
+    relative_strength = average_gain / average_loss
+    return round(100 - (100 / (1 + relative_strength)), 1)
 
 
 def _demo_news(symbol: str) -> list[NewsItem]:

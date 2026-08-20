@@ -28,12 +28,18 @@ def load_phase2_symbols(*, source: str = "configured", limit: int = 500) -> list
     raise ValueError(f"Unsupported PHASE2_SYMBOL_SOURCE: {source}")
 
 
-def fetch_fmp_screener_symbols(*, limit: int = 500, min_average_volume: int | None = None) -> list[dict]:
+def fetch_fmp_screener_symbols(
+    *,
+    limit: int = 500,
+    min_average_volume: int | None = None,
+    min_price: float | None = None,
+) -> list[dict]:
     api_key = os.getenv("FMP_API_KEY") or os.getenv("MARKETDATA_API_KEY")
     if not api_key:
         raise RuntimeError("FMP_API_KEY is required for PHASE2_SYMBOL_SOURCE=fmp")
     params = {
         "volumeMoreThan": str(min_average_volume or os.getenv("PHASE2_MIN_AVERAGE_VOLUME", "3000000")),
+        "priceMoreThan": f"{min_price:g}" if min_price is not None else os.getenv("PHASE2_MIN_PRICE", "10"),
         "isActivelyTrading": "true",
         "isEtf": "false",
         "country": os.getenv("FMP_SCREENER_COUNTRY", "US"),

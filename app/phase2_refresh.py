@@ -5,6 +5,7 @@ import os
 from typing import Any
 
 from marketdata import MarketDataClient, MarketDataError, demo_candles
+from momentum import adjusted_momentum_score, grade_for_score
 from options_activity import analyze_options_activity, demo_options_activity
 from phase2_db import (
     connect,
@@ -17,7 +18,7 @@ from phase2_db import (
     upsert_option_scores,
     upsert_symbols,
 )
-from phase2_pipeline import MIN_AVERAGE_DAILY_VOLUME, candles_to_bars, momentum_signal_to_db, score_market_candidates
+from phase2_pipeline import MIN_AVERAGE_DAILY_VOLUME, MIN_STOCK_PRICE, candles_to_bars, momentum_signal_to_db, score_market_candidates
 from phase2_pipeline import phase2_symbol
 from symbol_source import load_phase2_symbols
 from universe import configured_universe
@@ -34,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--concurrency", type=int, default=int(os.getenv("PHASE2_FMP_CONCURRENCY") or os.getenv("PHASE2_MARKETDATA_CONCURRENCY", "2")))
     parser.add_argument("--options-concurrency", type=int, default=int(os.getenv("PHASE2_OPTIONS_CONCURRENCY", "2")))
     parser.add_argument("--min-average-volume", type=int, default=int(os.getenv("PHASE2_MIN_AVERAGE_VOLUME", str(MIN_AVERAGE_DAILY_VOLUME))))
+    parser.add_argument("--min-price", type=float, default=float(os.getenv("PHASE2_MIN_PRICE", str(MIN_STOCK_PRICE))))
     parser.add_argument("--volume-prefilter-days", type=int, default=int(os.getenv("PHASE2_VOLUME_PREFILTER_DAYS", "20")))
     return parser.parse_args()
 
@@ -47,6 +49,7 @@ async def main() -> None:
         symbols = await _filter_symbols_by_average_volume(
             symbols,
             min_average_volume=args.min_average_volume,
+            min_price=args.min_price,
             days=args.volume_prefilter_days,
             concurrency=args.concurrency,
         )
@@ -77,17 +80,24 @@ async def main() -> None:
             benchmark_candles = candle_map.get(benchmark) if benchmark else []
             if benchmark and not benchmark_candles:
                 benchmark_candles = demo_candles(benchmark, args.countback)
-            scores = score_market_candidates(candle_map, benchmark_candles or [], top_n=args.top, benchmark_symbol=benchmark)
-            upsert_momentum_scores(
-                connection,
-                run_id,
-                [momentum_signal_to_db(score) for score in scores],
+            scores = score_market_candidates(
+                candle_map,
+                benchmark_candles or [],
+                top_n=args.top,
+                benchmark_symbol=benchmark,
+                min_price=args.min_price,
             )
             option_scores = await _score_options(
                 symbols=[score.symbol for score in scores],
                 run_id=run_id,
                 demo=args.demo,
                 concurrency=args.options_concurrency,
+            )
+            scores = _apply_options_score_adjustments(scores, option_scores)
+            upsert_momentum_scores(
+                connection,
+                run_id,
+                [momentum_signal_to_db(score) for score in scores],
             )
             upsert_option_scores(connection, run_id, option_scores)
             prune_scores_for_run(connection, run_id)
@@ -112,6 +122,7 @@ async def _filter_symbols_by_average_volume(
     symbols: list[dict[str, Any]],
     *,
     min_average_volume: int,
+    min_price: float = MIN_STOCK_PRICE,
     days: int,
     concurrency: int,
 ) -> list[dict[str, Any]]:
@@ -129,6 +140,8 @@ async def _filter_symbols_by_average_volume(
             except MarketDataError:
                 return None
         if len(candles) < days:
+            return None
+        if candles[-1].close <= min_price:
             return None
         average_volume = sum(candle.volume for candle in candles[-days:]) / days
         return item if average_volume > min_average_volume else None
@@ -191,6 +204,20 @@ async def _score_options(
         return _option_activity_to_db(symbol, analyze_options_activity(rows))
 
     return await asyncio.gather(*(score(symbol) for symbol in symbols))
+
+
+def _apply_options_score_adjustments(scores, option_scores: list[dict[str, Any]]):
+    option_score_by_symbol = {row["symbol"]: row for row in option_scores}
+    adjusted = []
+    for score in scores:
+        options = option_score_by_symbol.get(score.symbol, {})
+        adjusted_score = adjusted_momentum_score(
+            score.score,
+            call_activity=options.get("call_activity"),
+        )
+        adjusted.append(score.model_copy(update={"score": adjusted_score, "grade": grade_for_score(adjusted_score)}))
+    adjusted.sort(key=lambda item: (item.score, item.factors.return_1m if item.factors.return_1m is not None else -999), reverse=True)
+    return adjusted
 
 
 def _option_activity_to_db(symbol: str, activity: dict[str, Any]) -> dict[str, Any]:

@@ -11,16 +11,15 @@ def analyze_options_activity(rows: list[dict]) -> dict:
     call_open_interest = _sum_side(rows, "call", "openInterest")
 
     put_call_ratio = _ratio(put_volume, call_volume)
-    put_call_source = "volume"
+    put_call_source = _option_source(rows) or "volume"
     if put_call_ratio is None:
         put_call_ratio = _ratio(put_open_interest, call_open_interest)
         put_call_source = "open_interest" if put_call_ratio is not None else "unavailable"
 
     call_activity_ratio = _ratio(call_volume, call_open_interest)
-    call_activity = _classify_call_activity(call_volume, call_activity_ratio, put_call_ratio)
+    call_activity = _classify_call_activity(call_volume, call_activity_ratio)
     preferred_contract = preferred_call_contract(rows)
     options_score = options_confirmation_score(
-        put_call_ratio=put_call_ratio,
         call_volume=call_volume,
         call_open_interest=call_open_interest,
         call_activity_ratio=call_activity_ratio,
@@ -36,36 +35,23 @@ def analyze_options_activity(rows: list[dict]) -> dict:
         "call_activity_ratio": round(call_activity_ratio, 2) if call_activity_ratio is not None else None,
         "call_activity": call_activity,
         "options_confirmation_score": options_score,
-        "options_signal": options_signal(options_score, put_call_ratio, call_activity, call_activity_ratio),
+        "options_signal": options_signal(options_score, call_activity, call_activity_ratio),
         "preferred_contract": preferred_contract,
     }
 
 
 def options_confirmation_score(
     *,
-    put_call_ratio: float | None,
     call_volume: float,
     call_open_interest: float,
     call_activity_ratio: float | None,
     call_activity: str,
     preferred_contract: PreferredContract | None,
 ) -> float | None:
-    if not call_volume and put_call_ratio is None and preferred_contract is None:
+    if not call_volume and preferred_contract is None:
         return None
 
     score = 45.0
-    if put_call_ratio is not None:
-        if put_call_ratio <= 0.55:
-            score += 20
-        elif put_call_ratio <= 0.8:
-            score += 13
-        elif put_call_ratio <= 1.1:
-            score += 4
-        elif put_call_ratio >= 1.5:
-            score -= 18
-        elif put_call_ratio >= 1.2:
-            score -= 10
-
     if call_activity == "unusually elevated":
         score += 18
     elif call_activity == "elevated":
@@ -100,7 +86,6 @@ def options_confirmation_score(
 
 def options_signal(
     score: float | None,
-    put_call_ratio: float | None,
     call_activity: str,
     call_activity_ratio: float | None,
 ) -> str:
@@ -114,8 +99,6 @@ def options_signal(
         return "Speculative call activity"
     if score >= 50:
         return "Options neutral"
-    if put_call_ratio is not None and put_call_ratio >= 1.2:
-        return "Options not confirming"
     return "Options weak"
 
 
@@ -161,7 +144,7 @@ def demo_options_activity(symbol: str) -> dict:
     call_volume = 1_000 + seed % 22_000
     call_open_interest = 4_000 + seed % 40_000
     call_activity_ratio = round(call_volume / call_open_interest, 2)
-    call_activity = _classify_call_activity(call_volume, call_activity_ratio, put_call_ratio)
+    call_activity = _classify_call_activity(call_volume, call_activity_ratio)
     strike = 50 + seed % 260
     preferred_contract = PreferredContract(
         option_symbol=f"{symbol}270115C{strike:08d}",
@@ -173,7 +156,6 @@ def demo_options_activity(symbol: str) -> dict:
         ask=round(8.2 + (seed % 900) / 100, 2),
     )
     options_score = options_confirmation_score(
-        put_call_ratio=put_call_ratio,
         call_volume=call_volume,
         call_open_interest=call_open_interest,
         call_activity_ratio=call_activity_ratio,
@@ -188,7 +170,7 @@ def demo_options_activity(symbol: str) -> dict:
         "call_activity_ratio": call_activity_ratio,
         "call_activity": call_activity,
         "options_confirmation_score": options_score,
-        "options_signal": options_signal(options_score, put_call_ratio, call_activity, call_activity_ratio),
+        "options_signal": options_signal(options_score, call_activity, call_activity_ratio),
         "preferred_contract": preferred_contract,
     }
 
@@ -213,15 +195,21 @@ def _ratio(numerator: float, denominator: float) -> float | None:
 def _classify_call_activity(
     call_volume: float,
     call_activity_ratio: float | None,
-    put_call_ratio: float | None,
 ) -> str:
     if not call_volume:
         return "unavailable"
-    if call_volume >= 5_000 and (call_activity_ratio or 0) >= 0.35 and (put_call_ratio is None or put_call_ratio <= 0.8):
+    if call_volume >= 5_000 and (call_activity_ratio or 0) >= 0.35:
         return "unusually elevated"
-    if call_volume >= 2_000 and ((call_activity_ratio or 0) >= 0.2 or (put_call_ratio is not None and put_call_ratio <= 0.7)):
+    if call_volume >= 2_000 and (call_activity_ratio or 0) >= 0.2:
         return "elevated"
     return "normal"
+
+
+def _option_source(rows: list[dict]) -> str | None:
+    sources = {str(row.get("source", "")).lower() for row in rows if row.get("source")}
+    if "institutional" in sources:
+        return "institutional"
+    return None
 
 
 def _expiration_distance(raw_expiration) -> int:

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from discover import _build_candidate, _live_discovery_universe, _sort_discovery_candidates
 from main import app
 from marketdata import MarketDataCache, MarketDataClient, MarketDataError, demo_candles
-from momentum import score_symbol
+from momentum import adjusted_momentum_score, score_symbol
 from options_activity import analyze_options_activity
 from phase2_refresh import _filter_symbols_by_average_volume, _option_activity_to_db
 from phase2_db import fetch_phase2_candidates, prune_scores_for_run
@@ -31,7 +31,35 @@ def test_score_symbol_returns_rankable_signal():
     assert signal.factors.return_3m is not None
     assert signal.factors.rsi_14 is not None
     assert 0 <= signal.factors.rsi_14 <= 100
+    assert signal.factors.current_volume_ratio_20d is not None
     assert signal.notes
+
+
+def test_adjusted_momentum_score_uses_rsi_and_call_activity():
+    base = 80
+
+    assert adjusted_momentum_score(base, rsi_14=82) == 74
+    assert adjusted_momentum_score(base, call_activity="elevated") == 83
+    assert adjusted_momentum_score(base, rsi_14=82, call_activity="unusually elevated") == 80
+
+
+def test_adjusted_momentum_score_rewards_current_volume_above_average():
+    base = 80
+
+    assert adjusted_momentum_score(base, current_volume_ratio_20d=1.5) == 84
+    assert adjusted_momentum_score(base, current_volume_ratio_20d=1.0) == 80
+    assert adjusted_momentum_score(base, current_volume_ratio_20d=0.5) == 76
+
+
+def test_score_symbol_compares_current_volume_to_prior_20_days():
+    benchmark = demo_candles("BENCH", 260)
+    candles = _with_volume(demo_candles("VOLUME", 260), 4_000_000)
+    candles[-1] = candles[-1].model_copy(update={"volume": 8_000_000})
+
+    signal = score_symbol("VOLUME", candles, benchmark)
+
+    assert signal.factors.current_volume_ratio_20d == 2.0
+    assert "Current volume is 2.00x the prior 20d average." in signal.notes
 
 
 def test_demo_scan_endpoint_ranks_results(monkeypatch):
@@ -59,6 +87,8 @@ def test_dashboard_served_at_root():
     assert "Stock Momentum AI" in response.text
     assert "PostgreSQL Momentum Candidates" in response.text
     assert "Demo" not in response.text
+    for sort_key in ("rank", "symbol", "price", "rsi", "score", "sector", "growth", "signal", "volume", "calls", "options", "source"):
+        assert f'data-sort-key="{sort_key}"' in response.text
 
 
 def test_demo_discover_endpoint_returns_movers(monkeypatch):
@@ -102,10 +132,29 @@ def test_discovery_candidate_requires_average_daily_volume_over_3m():
     assert candidate is None
 
 
+def test_discovery_candidate_requires_stock_price_over_10():
+    candles = _with_volume(demo_candles("CHEAP", 260), 4_000_000)
+    candles[-1] = candles[-1].model_copy(update={"open": 10, "high": 10, "low": 10, "close": 10})
+
+    candidate = asyncio.run(
+        _build_candidate(
+            "CHEAP",
+            "Technology",
+            candles,
+            [],
+            earnings=[],
+            options_activity=None,
+        )
+    )
+
+    assert candidate is None
+
+
 def test_live_discovery_universe_uses_fmp_screener(monkeypatch):
-    def fake_screener(*, limit=500, min_average_volume=None):
+    def fake_screener(*, limit=500, min_average_volume=None, min_price=None):
         assert limit == 25
         assert min_average_volume == 3_000_000
+        assert min_price == 10
         return [
             {"symbol": "MRVL", "sector": "Technology"},
             {"symbol": "IBM", "sector": "Technology"},
@@ -113,6 +162,7 @@ def test_live_discovery_universe_uses_fmp_screener(monkeypatch):
 
     monkeypatch.setenv("DISCOVERY_SYMBOL_LIMIT", "25")
     monkeypatch.setenv("DISCOVERY_MIN_AVERAGE_VOLUME", "3000000")
+    monkeypatch.setenv("DISCOVERY_MIN_PRICE", "10")
     monkeypatch.setattr("discover.fetch_fmp_screener_symbols", fake_screener)
 
     universe = _live_discovery_universe()
@@ -257,6 +307,7 @@ def test_phase2_fmp_source_uses_screener(monkeypatch):
     assert [item["symbol"] for item in symbols] == ["MRVL", "BRK.B"]
     assert symbols[0]["exchange"] == "NASDAQ"
     assert "volumeMoreThan=3000000" in captured["url"]
+    assert "priceMoreThan=10" in captured["url"]
     assert "apikey=test-token" in captured["url"]
 
 
@@ -267,14 +318,19 @@ def test_phase2_prefilter_uses_average_daily_volume(monkeypatch):
 
         async def candles(self, symbol, countback=20):
             volume = 4_000_000 if symbol == "HIGH" else 3_000_000
-            return _with_volume(demo_candles(symbol, countback), volume)
+            candles = _with_volume(demo_candles(symbol, countback), volume)
+            if symbol == "CHEAP":
+                candles = _with_volume(demo_candles(symbol, countback), 4_000_000)
+                candles[-1] = candles[-1].model_copy(update={"open": 10, "high": 10, "low": 10, "close": 10})
+            return candles
 
     monkeypatch.setattr("phase2_refresh.MarketDataClient", FakeClient)
 
     symbols = asyncio.run(
         _filter_symbols_by_average_volume(
-            [{"symbol": "HIGH"}, {"symbol": "EDGE"}],
+            [{"symbol": "HIGH"}, {"symbol": "EDGE"}, {"symbol": "CHEAP"}],
             min_average_volume=3_000_000,
+            min_price=10,
             days=20,
             concurrency=2,
         )
@@ -302,6 +358,7 @@ def test_phase2_scores_filter_low_average_daily_volume():
     benchmark = demo_candles("BENCH", 260)
     candle_map = {
         "LOWV": _with_volume(demo_candles("LOWV", 260), 1_000_000),
+        "CHEAP": _with_last_price(_with_volume(demo_candles("CHEAP", 260), 4_000_000), 10),
         "NVDA": demo_candles("NVDA", 260),
         "BENCH": benchmark,
     }
@@ -309,6 +366,7 @@ def test_phase2_scores_filter_low_average_daily_volume():
     scores = score_market_candidates(candle_map, benchmark, top_n=5, benchmark_symbol="BENCH")
 
     assert "LOWV" not in {score.symbol for score in scores}
+    assert "CHEAP" not in {score.symbol for score in scores}
     assert "NVDA" in {score.symbol for score in scores}
 
 
@@ -352,6 +410,7 @@ def test_phase2_candidates_sort_by_score_then_growth():
     fetch_phase2_candidates(connection, limit=10)
 
     assert "order by m.score desc, (m.factors->>'return_1m')::numeric desc nulls last" in connection.cursor_instance.query
+    assert "and m.last_close > %s" in connection.cursor_instance.query
     assert "o.put_call_source" in connection.cursor_instance.query
     assert "o.call_volume" in connection.cursor_instance.query
     assert "o.call_activity_ratio" in connection.cursor_instance.query
@@ -460,6 +519,12 @@ def _with_volume(candles: list[Candle], volume: int) -> list[Candle]:
     ]
 
 
+def _with_last_price(candles: list[Candle], price: float) -> list[Candle]:
+    updated = list(candles)
+    updated[-1] = updated[-1].model_copy(update={"open": price, "high": price, "low": price, "close": price})
+    return updated
+
+
 def test_marketdata_cache_round_trips_payload(tmp_path):
     cache = MarketDataCache(tmp_path)
 
@@ -508,10 +573,125 @@ def test_historical_bulk_candles_uses_fmp_eod_date(monkeypatch):
     assert captured["cache_ttl_seconds"] is None
 
 
-def test_option_chain_returns_empty_until_fmp_options_endpoint_is_configured(monkeypatch):
+def test_option_chain_returns_empty_without_options_provider(monkeypatch):
+    monkeypatch.delenv("OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
+    monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
+    monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
     client = MarketDataClient(api_key="test-token")
 
     assert asyncio.run(client.option_chain("MSFT")) == []
+
+
+def test_option_chain_reads_marketdata_options_provider(monkeypatch):
+    monkeypatch.setenv("MARKETDATA_OPTIONS_API_KEY", "options-token")
+    client = MarketDataClient(api_key="test-token")
+
+    async def fake_get_marketdata_options(symbol):
+        assert symbol == "MSFT"
+        return {
+            "s": "ok",
+            "optionSymbol": ["MSFT260828C00490000", "MSFT260828P00470000"],
+            "symbol": ["MSFT", "MSFT"],
+            "expiration": ["2026-08-28", "2026-08-28"],
+            "strike": [490, 470],
+            "side": ["call", "put"],
+            "bid": [12.1, 8.2],
+            "ask": [12.5, 8.6],
+            "mid": [12.3, 8.4],
+            "delta": [0.7, -0.35],
+            "openInterest": [10000, 7000],
+            "volume": [6000, 1200],
+        }
+
+    monkeypatch.setattr(client, "_get_marketdata_options", fake_get_marketdata_options)
+
+    rows = asyncio.run(client.option_chain("MSFT"))
+
+    assert rows[0]["side"] == "call"
+    assert rows[0]["volume"] == 6000
+    assert rows[1]["side"] == "put"
+
+
+def test_option_chain_normalizes_configured_row_provider(monkeypatch):
+    monkeypatch.delenv("OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
+    monkeypatch.setenv("FMP_OPTIONS_CHAIN_PATH", "options-chain")
+    monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
+    client = MarketDataClient(api_key="test-token")
+
+    async def fake_get(url, params, *, cache_ttl_seconds=300):
+        assert url.endswith("/options-chain")
+        assert params == {"symbol": "AAPL"}
+        return {
+            "calls": [
+                {
+                    "contractSymbol": "AAPL260828C00300000",
+                    "expirationDate": "2026-08-28",
+                    "strikePrice": 300,
+                    "bid": 5,
+                    "ask": 5.4,
+                    "delta": 0.65,
+                    "open_interest": 10000,
+                    "volume": 5000,
+                }
+            ],
+            "puts": [
+                {
+                    "contractSymbol": "AAPL260828P00290000",
+                    "expirationDate": "2026-08-28",
+                    "strikePrice": 290,
+                    "volume": 1500,
+                    "open_interest": 9000,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    rows = asyncio.run(client.option_chain("AAPL"))
+
+    assert rows[0]["side"] == "call"
+    assert rows[0]["optionSymbol"] == "AAPL260828C00300000"
+    assert rows[0]["mid"] == 5.2
+    assert rows[1]["side"] == "put"
+
+
+def test_option_chain_uses_fmp_positions_summary(monkeypatch):
+    monkeypatch.delenv("OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
+    monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
+    monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "true")
+    monkeypatch.setenv("FMP_POSITIONS_SUMMARY_YEAR", "2026")
+    monkeypatch.setenv("FMP_POSITIONS_SUMMARY_QUARTER", "2")
+    client = MarketDataClient(api_key="test-token")
+
+    async def fake_get(url, params, *, cache_ttl_seconds=300):
+        assert url.endswith("/institutional-ownership/symbol-positions-summary")
+        assert params == {"symbol": "AAPL", "year": 2026, "quarter": 2}
+        return [
+            {
+                "symbol": "AAPL",
+                "year": 2026,
+                "quarter": 2,
+                "totalCalls": 10000,
+                "totalPuts": 2500,
+                "lastTotalCalls": 8000,
+                "lastTotalPuts": 3000,
+                "putCallRatio": 0.25,
+            }
+        ]
+
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    activity = analyze_options_activity(asyncio.run(client.option_chain("AAPL")))
+
+    assert activity["put_call_ratio"] == 0.25
+    assert activity["put_call_source"] == "institutional"
+    assert activity["call_volume"] == 10000
 
 
 def test_options_confirmation_score_rewards_bullish_call_activity():
@@ -545,6 +725,31 @@ def test_options_confirmation_score_rewards_bullish_call_activity():
     assert activity["preferred_contract"].expiration == "2026-08-28"
     assert activity["options_confirmation_score"] >= 80
     assert activity["options_signal"] == "Confirmed bullish momentum"
+
+
+def test_put_volume_does_not_affect_options_scoring():
+    call = {
+        "optionSymbol": "AAPL260828C00300000",
+        "expiration": "2026-08-28",
+        "strike": 300,
+        "side": "call",
+        "volume": 5000,
+        "openInterest": 10000,
+        "delta": 0.65,
+    }
+    low_put_volume = analyze_options_activity([
+        call,
+        {"side": "put", "volume": 100, "openInterest": 10000},
+    ])
+    high_put_volume = analyze_options_activity([
+        call,
+        {"side": "put", "volume": 15000, "openInterest": 10000},
+    ])
+
+    assert low_put_volume["put_call_ratio"] != high_put_volume["put_call_ratio"]
+    assert low_put_volume["call_activity"] == high_put_volume["call_activity"]
+    assert low_put_volume["options_confirmation_score"] == high_put_volume["options_confirmation_score"]
+    assert low_put_volume["options_signal"] == high_put_volume["options_signal"]
 
 
 def test_preferred_contract_formats_epoch_expiration():

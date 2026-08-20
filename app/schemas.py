@@ -30,6 +30,7 @@ class MomentumFactors(BaseModel):
     distance_to_50d_sma: float | None
     distance_to_200d_sma: float | None
     volume_ratio_20d_vs_60d: float | None
+    current_volume_ratio_20d: float | None
     rsi_14: float | None
 
 
@@ -78,8 +79,9 @@ class DiscoveryCandidate(BaseModel):
     return_2w: float
     start_close: float
     last_close: float
+    rsi_14: float | None = None
     put_call_ratio: float | None = None
-    put_call_source: Literal["volume", "open_interest", "demo", "unavailable"] = "unavailable"
+    put_call_source: Literal["volume", "open_interest", "institutional", "demo", "unavailable"] = "unavailable"
     call_volume: int | None = None
     call_open_interest: int | None = None
     call_activity_ratio: float | None = None

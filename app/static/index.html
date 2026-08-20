@@ -98,32 +98,90 @@
                 <col class="col-rank" />
                 <col class="col-symbol" />
                 <col class="col-price" />
+                <col class="col-rsi" />
                 <col class="col-score" />
                 <col class="col-sector" />
                 <col class="col-growth" />
-                <col class="col-rsi" />
                 <col class="col-signal" />
                 <col class="col-volume" />
-                <col class="col-put-call" />
                 <col class="col-calls" />
                 <col class="col-options" />
                 <col class="col-catalyst-setup" />
               </colgroup>
               <thead>
                 <tr>
-                  <th>Rank</th>
-                  <th>Symbol</th>
-                  <th>Price</th>
-                  <th>Score</th>
-                  <th>Sector / Exchange</th>
-                  <th id="growthColumnHeader">2W Growth</th>
-                  <th>RSI</th>
-                  <th>Signal</th>
-                  <th>Volume</th>
-                  <th>Put/Call</th>
-                  <th>Calls</th>
-                  <th>Options</th>
-                  <th>Source / Setup</th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="rank">
+                      <span>Rank</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="symbol">
+                      <span>Symbol</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="price">
+                      <span>Price</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="rsi">
+                      <span>RSI</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="score">
+                      <span>Score</span>
+                      <span class="sort-indicator" aria-hidden="true">↓</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="sector">
+                      <span>Sector / Exchange</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th id="growthColumnHeader">
+                    <button class="sort-button" type="button" data-sort-key="growth">
+                      <span id="growthColumnLabel">2W Growth</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="signal">
+                      <span>Signal</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="volume">
+                      <span>Volume</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="calls">
+                      <span>Calls</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="options">
+                      <span>Options</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button class="sort-button" type="button" data-sort-key="source">
+                      <span>Source / Setup</span>
+                      <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody id="discoverBody"></tbody>
@@ -214,6 +272,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=202608191255"></script>
+    <script src="/static/app.js?v=202608201700"></script>
   </body>
 </html>

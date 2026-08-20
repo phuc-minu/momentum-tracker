@@ -21,6 +21,8 @@ This skill stores non-secret deployment memory for the Stock Momentum AI / Tech 
 - Region: `westus2`
 - Prefix: `momentumai`
 - Container App: `momentumai-api`
+- Container Apps Job: `momentumai-db-refresh`
+- DB refresh schedule: `30 22 * * 1-5` (22:30 UTC Monday-Friday)
 - Container App FQDN: `momentumai-api.bluepebble-c6bb0fe0.westus2.azurecontainerapps.io`
 - Public app URL: `https://momentumai-api.bluepebble-c6bb0fe0.westus2.azurecontainerapps.io`
 - Health URL: `https://momentumai-api.bluepebble-c6bb0fe0.westus2.azurecontainerapps.io/health`
@@ -110,6 +112,7 @@ Current known result: `21 passed`.
 
 Job alias:
 - `db refresh` means run `app/phase2_refresh.py` to refresh Azure PostgreSQL Phase 2 data.
+- Azure schedules `db refresh` through the `momentumai-db-refresh` Container Apps Job at 22:30 UTC Monday-Friday.
 
 Phase 2 adds a PostgreSQL-backed precomputed screener:
 - `app/phase2_db.py` defines PostgreSQL tables for `symbols`, `daily_bars`, `momentum_scores`, `option_scores`, and `refresh_runs`.
@@ -126,6 +129,7 @@ Safe refresh knobs:
 - `PHASE2_SYMBOLS=NVDA,MSFT,...`
 - `PHASE2_SYMBOL_LIMIT=500`
 - `PHASE2_TOP_N=50`
+- `PHASE2_MIN_PRICE=10`
 - `PHASE2_FMP_CONCURRENCY=2`
 
 Run the demo job from `app`:

@@ -26,6 +26,7 @@ $deploy = az deployment group create `
 $acr = $deploy.acrName.value
 $vault = $deploy.keyVaultName.value
 $identityId = $deploy.identityId.value
+$environmentId = $deploy.containerAppsEnvironmentId.value
 $app = $deploy.containerAppName.value
 $subscriptionId = az account show --query id -o tsv
 $vaultId = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.KeyVault/vaults/$vault"
@@ -120,6 +121,28 @@ if ($envArgs.Count -gt 0) {
 } else {
   az containerapp update --name $app --resource-group $ResourceGroup `
     --image "$acrLogin/tech-momentum-ai:$imageTag" --output none
+}
+
+$databaseSecretId = az keyvault secret show --vault-name $vault --name database-url --query id -o tsv 2>$null
+$fmpSecretId = az keyvault secret show --vault-name $vault --name fmp-api-key --query id -o tsv 2>$null
+if ($databaseSecretId -and $fmpSecretId) {
+  $marketDataSecretId = az keyvault secret show --vault-name $vault --name marketdata-api-key --query id -o tsv 2>$null
+  $includeMarketDataSecret = [bool]$marketDataSecretId
+  az deployment group create `
+    --resource-group $ResourceGroup `
+    --template-file ./infra/db-refresh-job.bicep `
+    --parameters location=$Location `
+      jobName="$Prefix-db-refresh" `
+      environmentId=$environmentId `
+      image="$acrLogin/tech-momentum-ai:$imageTag" `
+      registryServer=$acrLogin `
+      identityId=$identityId `
+      keyVaultName=$vault `
+      includeMarketDataSecret=$includeMarketDataSecret `
+    --output none
+  Write-Host "Scheduled db refresh: weekdays at 22:30 UTC"
+} else {
+  Write-Warning "Skipping scheduled db refresh because database-url or fmp-api-key is missing from Key Vault."
 }
 
 $fqdn = az containerapp show --name $app --resource-group $ResourceGroup --query properties.configuration.ingress.fqdn -o tsv

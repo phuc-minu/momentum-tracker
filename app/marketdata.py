@@ -69,6 +69,9 @@ class MarketDataClient:
     def __init__(self, api_key: str | None = None, timeout_seconds: float = 20.0, cache: MarketDataCache | None = None):
         self.api_key = api_key or os.getenv("FMP_API_KEY") or os.getenv("MARKETDATA_API_KEY")
         self.base_url = os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com/stable/").rstrip("/") + "/"
+        self.options_api_key = os.getenv("OPTIONS_API_KEY") or os.getenv("MARKETDATA_OPTIONS_API_KEY") or os.getenv("MARKETDATA_API_KEY")
+        self.options_base_url = os.getenv("OPTIONS_CHAIN_URL_TEMPLATE", "https://api.marketdata.app/v1/options/chain/{symbol}/")
+        self.fmp_options_chain_path = os.getenv("FMP_OPTIONS_CHAIN_PATH", "").strip()
         self.timeout_seconds = timeout_seconds
         self.cache = cache or MarketDataCache()
 
@@ -132,9 +135,6 @@ class MarketDataClient:
         ]
 
     async def put_call_ratio(self, symbol: str) -> tuple[float | None, str]:
-        if not self.api_key:
-            raise MarketDataError("FMP_API_KEY is required for live options data")
-
         rows = await self.option_chain(symbol)
         volume_ratio = _put_call_ratio_from_rows(rows, "volume")
         if volume_ratio is not None:
@@ -146,8 +146,35 @@ class MarketDataClient:
         return None, "unavailable"
 
     async def option_chain(self, symbol: str) -> list[dict]:
-        if not self.api_key:
-            raise MarketDataError("FMP_API_KEY is required for live options data")
+        if self.options_api_key:
+            payload = await self._get_marketdata_options(symbol)
+            status = _payload_status(payload)
+            if status == "no_data":
+                return []
+            if status != "ok":
+                raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {status}"))
+            return _unpack_columnar_payload(payload)
+
+        if self.api_key and _fmp_positions_summary_enabled():
+            payload = await self._get(
+                self._url("institutional-ownership/symbol-positions-summary"),
+                _fmp_positions_summary_params(symbol),
+                cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
+            )
+            rows = _fmp_positions_summary_to_option_rows(payload)
+            if rows:
+                return rows
+
+        if self.fmp_options_chain_path:
+            if not self.api_key:
+                raise MarketDataError("FMP_API_KEY is required for FMP options data")
+            payload = await self._get(
+                self._url(self.fmp_options_chain_path.format(symbol=symbol)),
+                {"symbol": symbol},
+                cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
+            )
+            return _normalize_option_rows(payload)
+
         return []
 
     async def _get(self, url: str, params: dict, *, cache_ttl_seconds: int | None = 300) -> Any:
@@ -178,6 +205,32 @@ class MarketDataClient:
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path.lstrip('/')}"
+
+    async def _get_marketdata_options(self, symbol: str) -> dict:
+        url = self.options_base_url.format(symbol=symbol)
+        params = _option_chain_params()
+        cache_key = _cache_key(url, {**params, "token": self.options_api_key})
+        cached_payload = self.cache.get(cache_key, _cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300))
+        if cached_payload is not None:
+            return cached_payload
+
+        headers = {"Authorization": f"Bearer {self.options_api_key}"}
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            try:
+                response = await client.get(url, headers=headers, params=params)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                raise MarketDataError(_http_error_message(error, provider="MarketData")) from error
+            except httpx.TimeoutException as error:
+                raise MarketDataError("MarketData options request timed out") from error
+            except httpx.HTTPError as error:
+                raise MarketDataError(f"MarketData options request failed: {error}") from error
+            payload = response.json()
+
+        if isinstance(payload, dict):
+            self.cache.set(cache_key, payload)
+            return payload
+        return {"s": "no_data"}
 
     async def _latest_quotes_as_candles(self, symbols: list[str]) -> dict[str, Candle]:
         candles = {}
@@ -225,6 +278,60 @@ def _cache_ttl(name: str, default_seconds: int) -> int:
         return default_seconds
 
 
+def _provider_cached_mode_enabled() -> bool:
+    return os.getenv("MARKETDATA_PROVIDER_CACHE", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _option_chain_params() -> dict[str, str]:
+    params = {
+        "monthly": "false",
+        "strikeLimit": os.getenv("MARKETDATA_OPTION_STRIKE_LIMIT", "5"),
+        "columns": "s,optionSymbol,symbol,expiration,strike,side,bid,ask,mid,delta,openInterest,volume",
+    }
+    if _provider_cached_mode_enabled():
+        params["mode"] = "cached"
+        params["maxage"] = os.getenv("MARKETDATA_PROVIDER_MAXAGE", "5min")
+    expiration = os.getenv("MARKETDATA_OPTION_EXPIRATION")
+    if expiration:
+        params["expiration"] = expiration
+    else:
+        params["dte"] = os.getenv("MARKETDATA_OPTION_DTE", "14")
+    return params
+
+
+def _payload_status(payload: dict) -> str | None:
+    status = payload.get("s")
+    if status:
+        return str(status)
+    return "ok" if any(isinstance(value, list) for value in payload.values()) else None
+
+
+def _fmp_positions_summary_enabled() -> bool:
+    raw = os.getenv("FMP_POSITIONS_SUMMARY_ENABLED", "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _fmp_positions_summary_params(symbol: str) -> dict[str, int | str]:
+    quarter, year = _fmp_positions_summary_period()
+    return {"symbol": symbol, "year": year, "quarter": quarter}
+
+
+def _fmp_positions_summary_period() -> tuple[int, int]:
+    env_year = os.getenv("FMP_POSITIONS_SUMMARY_YEAR")
+    env_quarter = os.getenv("FMP_POSITIONS_SUMMARY_QUARTER")
+    if env_year and env_quarter:
+        try:
+            return max(1, min(4, int(env_quarter))), int(env_year)
+        except ValueError:
+            pass
+
+    today = datetime.now(UTC).date()
+    current_quarter = ((today.month - 1) // 3) + 1
+    if current_quarter == 1:
+        return 4, today.year - 1
+    return current_quarter - 1, today.year
+
+
 def _from_date_for_countback(countback: int) -> str:
     calendar_days = max(countback * 2, countback + 30)
     return (datetime.now(UTC).date() - timedelta(days=calendar_days)).isoformat()
@@ -247,6 +354,149 @@ def _as_rows(payload: Any) -> list[dict]:
         if payload.get("symbol"):
             return [payload]
     return []
+
+
+def _unpack_columnar_payload(payload: dict) -> list[dict]:
+    columns = {
+        key: value
+        for key, value in payload.items()
+        if isinstance(value, list) and key != "s"
+    }
+    if not columns:
+        return []
+    row_count = max(len(value) for value in columns.values())
+    rows: list[dict] = []
+    for index in range(row_count):
+        rows.append(
+            {
+                key: value[index] if index < len(value) else None
+                for key, value in columns.items()
+            }
+        )
+    return rows
+
+
+def _normalize_option_rows(payload: Any) -> list[dict]:
+    rows: list[dict] = []
+    for row in _flatten_option_payload(payload):
+        normalized = _normalize_option_row(row)
+        if normalized:
+            rows.append(normalized)
+    return rows
+
+
+def _fmp_positions_summary_to_option_rows(payload: Any) -> list[dict]:
+    rows = _as_rows(payload)
+    if not rows:
+        return []
+    row = rows[0]
+    total_calls = _as_float(row.get("totalCalls") or row.get("total_calls"))
+    total_puts = _as_float(row.get("totalPuts") or row.get("total_puts"))
+    put_call_ratio = _as_float(row.get("putCallRatio") or row.get("put_call_ratio"))
+    if total_calls is None and total_puts is not None and put_call_ratio and put_call_ratio > 0:
+        total_calls = total_puts / put_call_ratio
+    if total_puts is None and total_calls is not None and put_call_ratio is not None:
+        total_puts = total_calls * put_call_ratio
+    if not total_calls and not total_puts:
+        return []
+
+    expiration = f"{row.get('year', '')}Q{row.get('quarter', '')}".strip("Q")
+    symbol = row.get("symbol")
+    return [
+        {
+            "optionSymbol": f"{symbol or ''}:institutional:calls",
+            "symbol": symbol,
+            "expiration": expiration or None,
+            "side": "call",
+            "volume": total_calls,
+            "openInterest": _as_float(row.get("lastTotalCalls") or row.get("last_total_calls")),
+            "source": "institutional",
+        },
+        {
+            "optionSymbol": f"{symbol or ''}:institutional:puts",
+            "symbol": symbol,
+            "expiration": expiration or None,
+            "side": "put",
+            "volume": total_puts,
+            "openInterest": _as_float(row.get("lastTotalPuts") or row.get("last_total_puts")),
+            "source": "institutional",
+        },
+    ]
+
+
+def _flatten_option_payload(payload: Any, side: str | None = None) -> list[dict]:
+    if isinstance(payload, list):
+        rows: list[dict] = []
+        for item in payload:
+            rows.extend(_flatten_option_payload(item, side))
+        return rows
+    if not isinstance(payload, dict):
+        return []
+
+    rows = []
+    for key in ("calls", "call"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            rows.extend(_flatten_option_payload(value, "call"))
+    for key in ("puts", "put"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            rows.extend(_flatten_option_payload(value, "put"))
+
+    for key in ("data", "results", "options", "chain"):
+        value = payload.get(key)
+        if isinstance(value, (list, dict)):
+            rows.extend(_flatten_option_payload(value, side))
+
+    if rows:
+        return rows
+    if any(key in payload for key in ("optionSymbol", "contractSymbol", "strike", "strikePrice", "volume", "openInterest")):
+        return [{**payload, "_side": side}]
+    return []
+
+
+def _normalize_option_row(row: dict) -> dict | None:
+    side = _normalize_option_side(row)
+    if not side:
+        return None
+    bid = _as_float(row.get("bid"))
+    ask = _as_float(row.get("ask"))
+    mid = _as_float(row.get("mid") or row.get("mark"))
+    if mid is None and bid is not None and ask is not None:
+        mid = round((bid + ask) / 2, 4)
+    option_symbol = row.get("optionSymbol") or row.get("contractSymbol") or row.get("symbol")
+    return {
+        "optionSymbol": option_symbol,
+        "symbol": row.get("underlyingSymbol") or row.get("underlying") or row.get("ticker"),
+        "expiration": row.get("expiration") or row.get("expirationDate") or row.get("expiry") or row.get("date"),
+        "strike": _as_float(row.get("strike") or row.get("strikePrice")),
+        "side": side,
+        "bid": bid,
+        "ask": ask,
+        "mid": mid,
+        "delta": _as_float(row.get("delta")),
+        "openInterest": _as_float(row.get("openInterest") or row.get("open_interest")),
+        "volume": _as_float(row.get("volume")),
+    }
+
+
+def _normalize_option_side(row: dict) -> str | None:
+    raw_side = row.get("_side") or row.get("side") or row.get("type") or row.get("optionType")
+    if raw_side:
+        value = str(raw_side).lower()
+        if value in {"call", "calls", "c"}:
+            return "call"
+        if value in {"put", "puts", "p"}:
+            return "put"
+
+    option_symbol = str(row.get("optionSymbol") or row.get("contractSymbol") or "")
+    if len(option_symbol) >= 9:
+        marker = option_symbol[-9]
+        if marker == "C":
+            return "call"
+        if marker == "P":
+            return "put"
+    return None
 
 
 def _parse_fmp_historical_payload(payload: Any) -> list[Candle]:
@@ -291,18 +541,20 @@ def _fmp_quote_to_candle(row: dict) -> Candle | None:
         return None
 
 
-def _http_error_message(error: httpx.HTTPStatusError) -> str:
+def _http_error_message(error: httpx.HTTPStatusError, *, provider: str = "FMP") -> str:
     status_code = error.response.status_code
     provider_message = _provider_error_message(error.response)
     rate_limit = _rate_limit_summary(error.response)
     if status_code == 429:
         details = ". ".join(item for item in [provider_message, rate_limit] if item)
         suffix = f" {details}" if details else ""
-        return f"FMP rate limit reached.{suffix}"
+        return f"{provider} rate limit reached.{suffix}"
     if status_code == 403:
+        if provider == "MarketData":
+            return "MarketData access is temporarily blocked. The provider allows one active device/IP per token; wait a few minutes before retrying from Azure."
         return "FMP access is forbidden. Check the FMP API key and plan entitlement."
     suffix = f": {provider_message}" if provider_message else ""
-    return f"FMP returned HTTP {status_code}{suffix}"
+    return f"{provider} returned HTTP {status_code}{suffix}"
 
 
 def _provider_error_message(response: httpx.Response) -> str:
@@ -347,6 +599,15 @@ def _put_call_ratio_from_rows(rows: list[dict], metric: str) -> float | None:
     if call_total <= 0:
         return None
     return round(put_total / call_total, 2)
+
+
+def _as_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def demo_candles(symbol: str, countback: int = 260) -> list[Candle]:

@@ -170,8 +170,12 @@ async def scan_post(request: ScanRequest, _: None = Depends(require_auth)):
 @app.get("/phase2/candidates", response_model=Phase2CandidateResponse)
 def phase2_candidates(limit: int = Query(default=50, ge=1, le=200), _: None = Depends(require_auth)):
     try:
+        min_price = float(os.getenv("PHASE2_MIN_PRICE", "10"))
+    except ValueError:
+        min_price = 10.0
+    try:
         with connect() as connection:
-            rows = fetch_phase2_candidates(connection, limit=limit)
+            rows = fetch_phase2_candidates(connection, limit=limit, min_price=min_price)
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return {

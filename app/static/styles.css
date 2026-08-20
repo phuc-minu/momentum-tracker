@@ -430,7 +430,7 @@ table {
 }
 
 .discover-table {
-  min-width: 1560px;
+  min-width: 1468px;
   table-layout: fixed;
   font-size: 12px;
 }
@@ -451,8 +451,7 @@ table {
 
 .discover-table .col-growth,
 .discover-table .col-rsi,
-.discover-table .col-volume,
-.discover-table .col-put-call {
+.discover-table .col-volume {
   width: 92px;
 }
 
@@ -496,6 +495,33 @@ td {
   line-height: 1.2;
 }
 
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sort-button:hover,
+.sort-button.active {
+  color: var(--text);
+}
+
+.sort-indicator {
+  display: inline-block;
+  width: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .discover-table td {
   line-height: 1.35;
 }
@@ -503,8 +529,8 @@ td {
 .discover-table td:nth-child(2),
 .discover-table td:nth-child(3),
 .discover-table td:nth-child(4),
-.discover-table td:nth-child(6),
-.discover-table td:nth-child(8),
+.discover-table td:nth-child(5),
+.discover-table td:nth-child(7),
 .discover-table td:nth-child(9) {
   white-space: nowrap;
 }

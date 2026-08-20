@@ -2,6 +2,23 @@ const state = {
   results: [],
   selectedSymbol: null,
   liveDataAvailable: false,
+  discoveryRows: [],
+  discoverySort: { key: "score", direction: "desc" },
+};
+
+const DISCOVERY_SORT_CONFIG = {
+  rank: { type: "number", direction: "asc", value: (item) => item.discovery_rank },
+  symbol: { type: "text", direction: "asc", value: (item) => item.symbol },
+  price: { type: "number", direction: "desc", value: (item) => item.last_close },
+  rsi: { type: "number", direction: "desc", value: (item) => item.rsi_14 },
+  score: { type: "number", direction: "desc", value: (item) => item.momentum_score },
+  sector: { type: "text", direction: "asc", value: (item) => item.market_group || item.sector },
+  growth: { type: "number", direction: "desc", value: (item) => item.return_2w },
+  signal: { type: "text", direction: "asc", value: (item) => item.price_signal },
+  volume: { type: "number", direction: "desc", value: (item) => item.volume_ratio_20d },
+  calls: { type: "number", direction: "desc", value: (item) => item.call_volume },
+  options: { type: "number", direction: "desc", value: (item) => item.options_confirmation_score },
+  source: { type: "text", direction: "asc", value: (item) => `${item.catalyst || ""} ${item.setup || ""}`.trim() },
 };
 
 const elements = {
@@ -37,7 +54,8 @@ const elements = {
   discoverButton: document.querySelector("#discoverButton"),
   discoverMeta: document.querySelector("#discoverMeta"),
   discoverBody: document.querySelector("#discoverBody"),
-  growthColumnHeader: document.querySelector("#growthColumnHeader"),
+  growthColumnLabel: document.querySelector("#growthColumnLabel"),
+  discoverySortButtons: document.querySelectorAll(".sort-button[data-sort-key]"),
   tabButtons: document.querySelectorAll(".tab-button"),
   tabPanels: document.querySelectorAll(".tab-panel"),
 };
@@ -52,10 +70,14 @@ elements.discoverButton.addEventListener("click", runDiscover);
 elements.tabButtons.forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
 });
+elements.discoverySortButtons.forEach((button) => {
+  button.addEventListener("click", () => setDiscoverySort(button.dataset.sortKey));
+});
 elements.symbolsInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") runScan();
 });
 elements.periodInput.addEventListener("change", () => updateGrowthColumnHeader());
+updateDiscoverySortIndicators();
 
 function activateTab(tabId) {
   elements.tabButtons.forEach((button) => {
@@ -226,12 +248,12 @@ async function runDiscover() {
         await runLiveDiscoverFallback(error.message);
       } catch (fallbackError) {
         elements.discoverMeta.textContent = fallbackError.message;
-        elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${fallbackError.message}</td></tr>`;
+        renderDiscoveryEmpty(fallbackError.message);
         renderModeNotice(`Phase 2 candidates unavailable. ${error.message}`);
       }
     } else {
       elements.discoverMeta.textContent = error.message;
-      elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${error.message}</td></tr>`;
+      renderDiscoveryEmpty(error.message);
     }
   } finally {
     setButtonLoading(elements.discoverButton, false);
@@ -293,14 +315,13 @@ function renderPhase2Discovery(payload) {
   const candidates = payload.results
     .map((item) => phase2ToDiscoveryRow(item, payload.period_days))
     .filter((item) => item.return_2w !== null && item.return_2w >= payload.growth_min)
-    .sort(compareDiscoveryRows)
     .slice(0, payload.limit);
 
   const status = payload.refresh_status;
   const statusText = status?.finished_at ? ` refreshed ${formatDateTime(status.finished_at)}` : "";
   elements.discoverMeta.textContent = `${candidates.length} candidates, PostgreSQL${statusText}`;
   if (!candidates.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">No Phase 2 candidates matched this filter</td></tr>`;
+    renderDiscoveryEmpty("No Phase 2 candidates matched this filter");
     return;
   }
 
@@ -308,16 +329,76 @@ function renderPhase2Discovery(payload) {
 }
 
 function compareDiscoveryRows(left, right) {
-  const scoreDelta = right.momentum_score - left.momentum_score;
-  if (scoreDelta !== 0) return scoreDelta;
-  return (right.return_2w ?? Number.NEGATIVE_INFINITY) - (left.return_2w ?? Number.NEGATIVE_INFINITY);
+  const config = DISCOVERY_SORT_CONFIG[state.discoverySort.key];
+  const primary = compareNullableValues(
+    config.value(left),
+    config.value(right),
+    state.discoverySort.direction,
+    config.type,
+  );
+  if (primary !== 0) return primary;
+
+  if (state.discoverySort.key !== "score") {
+    const scoreTieBreak = compareNullableValues(left.momentum_score, right.momentum_score, "desc", "number");
+    if (scoreTieBreak !== 0) return scoreTieBreak;
+  }
+  const growthTieBreak = compareNullableValues(left.return_2w, right.return_2w, "desc", "number");
+  if (growthTieBreak !== 0) return growthTieBreak;
+  return left.symbol.localeCompare(right.symbol);
+}
+
+function compareNullableValues(left, right, direction, type) {
+  const leftMissing = left === null || left === undefined || left === "" || (type === "number" && Number.isNaN(Number(left)));
+  const rightMissing = right === null || right === undefined || right === "" || (type === "number" && Number.isNaN(Number(right)));
+  if (leftMissing && rightMissing) return 0;
+  if (leftMissing) return 1;
+  if (rightMissing) return -1;
+  const comparison = type === "number"
+    ? Number(left) - Number(right)
+    : String(left).localeCompare(String(right), undefined, { sensitivity: "base" });
+  return direction === "asc" ? comparison : -comparison;
+}
+
+function compareDefaultDiscoveryRows(left, right) {
+  const score = compareNullableValues(left.momentum_score, right.momentum_score, "desc", "number");
+  if (score !== 0) return score;
+  const growth = compareNullableValues(left.return_2w, right.return_2w, "desc", "number");
+  if (growth !== 0) return growth;
+  return left.symbol.localeCompare(right.symbol);
+}
+
+function setDiscoverySort(key) {
+  if (state.discoverySort.key === key) {
+    state.discoverySort.direction = state.discoverySort.direction === "desc" ? "asc" : "desc";
+  } else {
+    state.discoverySort = { key, direction: DISCOVERY_SORT_CONFIG[key].direction };
+  }
+  updateDiscoverySortIndicators();
+  if (state.discoveryRows.length) renderSortedDiscoveryRows();
+}
+
+function updateDiscoverySortIndicators() {
+  elements.discoverySortButtons.forEach((button) => {
+    const active = button.dataset.sortKey === state.discoverySort.key;
+    const header = button.closest("th");
+    const indicator = button.querySelector(".sort-indicator");
+    button.classList.toggle("active", active);
+    if (active) {
+      const ascending = state.discoverySort.direction === "asc";
+      header.setAttribute("aria-sort", ascending ? "ascending" : "descending");
+      indicator.textContent = ascending ? "↑" : "↓";
+    } else {
+      header.removeAttribute("aria-sort");
+      indicator.textContent = "↕";
+    }
+  });
 }
 
 function renderDiscovery(payload) {
   updateGrowthColumnHeader(payload.period_days);
   elements.discoverMeta.textContent = `${payload.count} movers, ${displayMode(payload.data_mode)} mode`;
   if (!payload.results.length) {
-    elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">No movers matched this filter</td></tr>`;
+    renderDiscoveryEmpty("No movers matched this filter");
     return;
   }
 
@@ -325,20 +406,38 @@ function renderDiscovery(payload) {
 }
 
 function renderDiscoveryRows(rows) {
-  elements.discoverBody.innerHTML = rows
-    .map((item, index) => {
+  const rankBySymbol = new Map(
+    [...rows]
+      .sort(compareDefaultDiscoveryRows)
+      .map((item, index) => [item.symbol, index + 1]),
+  );
+  state.discoveryRows = rows.map((item) => ({
+    ...item,
+    discovery_rank: rankBySymbol.get(item.symbol),
+  }));
+  renderSortedDiscoveryRows();
+}
+
+function renderDiscoveryEmpty(message) {
+  state.discoveryRows = [];
+  elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${message}</td></tr>`;
+}
+
+function renderSortedDiscoveryRows() {
+  elements.discoverBody.innerHTML = [...state.discoveryRows]
+    .sort(compareDiscoveryRows)
+    .map((item) => {
       return `
         <tr>
-          <td>${index + 1}</td>
+          <td>${item.discovery_rank}</td>
           <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
           <td>${formatPrice(item.last_close)}</td>
+          <td>${formatRsi(item.rsi_14)}</td>
           <td><strong title="${escapeAttribute(scoreHint(item))}" aria-label="${escapeAttribute(scoreHint(item))}">${item.momentum_score.toFixed(1)}</strong></td>
           <td><span class="sector-pill">${item.market_group || item.sector || "Unclassified"}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
-          <td>${formatRsi(item.rsi_14)}</td>
           <td>${formatSignal(item.price_signal)}</td>
           <td>${formatRatio(item.volume_ratio_20d)}</td>
-          <td>${formatPutCall(item.put_call_ratio, item.put_call_source)}</td>
           <td>${formatCallActivity(item)}</td>
           <td>${formatOptionsConfirmation(item)}</td>
           <td class="catalyst-cell">${formatCatalystSetup(item)}</td>
@@ -358,12 +457,10 @@ function phase2ToDiscoveryRow(item, periodDays) {
     momentum_score: item.score,
     setup: item.setup,
     price_signal: phase2PriceSignal(factors),
-    volume_ratio_20d: factors.volume_ratio_20d_vs_60d,
+    volume_ratio_20d: factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d,
     rsi_14: factors.rsi_14,
     return_2w: growth,
     last_close: item.last_close,
-    put_call_ratio: item.put_call_ratio,
-    put_call_source: item.put_call_source || "unavailable",
     call_volume: item.call_volume,
     call_open_interest: item.call_open_interest,
     call_activity_ratio: item.call_activity_ratio,
@@ -408,7 +505,7 @@ function phase2PriceSignal(factors) {
 }
 
 function updateGrowthColumnHeader(periodDays = Number(elements.periodInput.value)) {
-  elements.growthColumnHeader.textContent = `${periodLabel(periodDays)} Growth`;
+  elements.growthColumnLabel.textContent = `${periodLabel(periodDays)} Growth`;
 }
 
 function periodLabel(periodDays) {
@@ -485,7 +582,7 @@ function renderTable() {
           <td><span class="setup-pill">${item.setup}</span></td>
           <td>${formatPercent(factors.relative_strength_3m)}</td>
           <td>${formatPercent(factors.distance_to_50d_sma)}</td>
-          <td>${formatRatio(factors.volume_ratio_20d_vs_60d)}</td>
+          <td>${formatRatio(factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d)}</td>
         </tr>
       `;
     })
@@ -593,13 +690,6 @@ function formatRsi(value) {
   return `<span class="${className}">${Number(value).toFixed(1)}</span>`;
 }
 
-function formatPutCall(value, source) {
-  if (value === null || value === undefined) return "--";
-  const className = value <= 0.7 ? "positive" : value >= 1.2 ? "negative" : "";
-  const label = source === "open_interest" ? "OI" : source === "demo" ? "beta" : source === "volume" ? "vol" : "";
-  return `<span class="${className}">${value.toFixed(2)}</span>${label ? ` <span class="subtle">${label}</span>` : ""}`;
-}
-
 function displayMode(mode) {
   return mode === "demo" ? "beta" : mode;
 }
@@ -633,11 +723,8 @@ function optionsHint(item) {
   const pieces = [
     `Options confirmation score ${item.options_confirmation_score.toFixed(0)} out of 100.`,
     `${item.options_signal}.`,
-    "Uses put/call ratio, call volume, call volume vs open interest, and preferred contract delta.",
+    "Uses call volume, call volume vs open interest, and preferred contract delta.",
   ];
-  if (item.put_call_ratio !== null && item.put_call_ratio !== undefined) {
-    pieces.push(`Put/call: ${item.put_call_ratio.toFixed(2)}.`);
-  }
   if (item.call_volume) {
     pieces.push(`Call volume: ${compactNumber(item.call_volume)}.`);
   }

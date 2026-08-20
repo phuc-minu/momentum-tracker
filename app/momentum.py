@@ -26,12 +26,14 @@ def score_symbol(symbol: str, candles: list[Candle], benchmark_candles: list[Can
     sma_200 = _sma(closes, 200)
     volume_20 = _average(volumes[-20:])
     volume_60 = _average(volumes[-60:])
+    prior_volume_20 = _average(volumes[-21:-1]) if len(volumes) >= 21 else None
     rsi_14 = _rsi(closes, 14)
 
     distance_to_20d_high = _ratio(last_close, high_20d) - 1 if high_20d else None
     distance_to_50d_sma = _ratio(last_close, sma_50) - 1 if sma_50 else None
     distance_to_200d_sma = _ratio(last_close, sma_200) - 1 if sma_200 else None
     volume_ratio = _ratio(volume_20, volume_60) if volume_60 else None
+    current_volume_ratio = _ratio(volumes[-1], prior_volume_20) if prior_volume_20 else None
 
     factors = MomentumFactors(
         return_1m=return_1m,
@@ -44,6 +46,7 @@ def score_symbol(symbol: str, candles: list[Candle], benchmark_candles: list[Can
         distance_to_50d_sma=distance_to_50d_sma,
         distance_to_200d_sma=distance_to_200d_sma,
         volume_ratio_20d_vs_60d=volume_ratio,
+        current_volume_ratio_20d=current_volume_ratio,
         rsi_14=rsi_14,
     )
 
@@ -78,7 +81,42 @@ def _score(factors: MomentumFactors) -> float:
     if factors.volume_ratio_20d_vs_60d is not None:
         raw += _clamp((factors.volume_ratio_20d_vs_60d - 1) * 14, -4, 6)
 
-    return _clamp(raw, 0, 100)
+    return adjusted_momentum_score(
+        _clamp(raw, 0, 94),
+        rsi_14=factors.rsi_14,
+        current_volume_ratio_20d=factors.current_volume_ratio_20d,
+    )
+
+
+def adjusted_momentum_score(
+    base_score: float,
+    *,
+    rsi_14: float | None = None,
+    call_activity: str | None = None,
+    current_volume_ratio_20d: float | None = None,
+) -> float:
+    score = base_score
+    if current_volume_ratio_20d is not None:
+        score += _clamp((current_volume_ratio_20d - 1) * 8, -6, 8)
+
+    if rsi_14 is not None:
+        if rsi_14 >= 85:
+            score -= 10
+        elif rsi_14 >= 75:
+            score -= 6
+        elif rsi_14 >= 70:
+            score -= 3
+
+    if call_activity == "unusually elevated":
+        score += 6
+    elif call_activity == "elevated":
+        score += 3
+
+    return round(_clamp(score, 0, 100), 1)
+
+
+def grade_for_score(score: float) -> str:
+    return _grade(score)
 
 
 def _classify_setup(factors: MomentumFactors) -> str:
@@ -111,6 +149,8 @@ def _notes(factors: MomentumFactors, setup: str) -> list[str]:
         notes.append(f"Price is {_percent(factors.distance_to_50d_sma)} from the 50d SMA.")
     if factors.volume_ratio_20d_vs_60d is not None:
         notes.append(f"20d volume is {factors.volume_ratio_20d_vs_60d:.2f}x the 60d average.")
+    if factors.current_volume_ratio_20d is not None:
+        notes.append(f"Current volume is {factors.current_volume_ratio_20d:.2f}x the prior 20d average.")
     if factors.rsi_14 is not None:
         notes.append(f"14d RSI is {factors.rsi_14:.1f}.")
     return notes
