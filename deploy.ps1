@@ -47,6 +47,10 @@ if ($env:MARKETDATA_API_KEY) {
   az keyvault secret set --vault-name $vault --name marketdata-api-key --value $env:MARKETDATA_API_KEY --output none
 }
 
+if ($env:FMP_API_KEY) {
+  az keyvault secret set --vault-name $vault --name fmp-api-key --value $env:FMP_API_KEY --output none
+}
+
 if ($env:OPENAI_API_KEY) {
   az keyvault secret set --vault-name $vault --name openai-api-key --value $env:OPENAI_API_KEY --output none
 }
@@ -71,17 +75,16 @@ az containerapp registry set --name $app --resource-group $ResourceGroup --serve
 $secretArgs = @()
 $envArgs = @()
 $discoveryOptions = if ($env:DISCOVERY_OPTIONS) { $env:DISCOVERY_OPTIONS } else { "true" }
-$marketDataProviderCache = if ($env:MARKETDATA_PROVIDER_CACHE) { $env:MARKETDATA_PROVIDER_CACHE } else { "false" }
-$marketDataOptionStrikeLimit = if ($env:MARKETDATA_OPTION_STRIKE_LIMIT) { $env:MARKETDATA_OPTION_STRIKE_LIMIT } else { "5" }
-$marketDataOptionDte = if ($env:MARKETDATA_OPTION_DTE) { $env:MARKETDATA_OPTION_DTE } else { "14" }
 $envArgs += "DISCOVERY_OPTIONS=$discoveryOptions"
-$envArgs += "MARKETDATA_PROVIDER_CACHE=$marketDataProviderCache"
-$envArgs += "MARKETDATA_OPTION_STRIKE_LIMIT=$marketDataOptionStrikeLimit"
-$envArgs += "MARKETDATA_OPTION_DTE=$marketDataOptionDte"
 if ($env:MARKETDATA_API_KEY) {
   $marketSecretUri = "https://$vault.vault.azure.net/secrets/marketdata-api-key"
   $secretArgs += "marketdata-api-key=keyvaultref:$marketSecretUri,identityref:$identityId"
   $envArgs += "MARKETDATA_API_KEY=secretref:marketdata-api-key"
+}
+if ($env:FMP_API_KEY) {
+  $fmpSecretUri = "https://$vault.vault.azure.net/secrets/fmp-api-key"
+  $secretArgs += "fmp-api-key=keyvaultref:$fmpSecretUri,identityref:$identityId"
+  $envArgs += "FMP_API_KEY=secretref:fmp-api-key"
 }
 if ($env:OPENAI_API_KEY) {
   $openaiSecretUri = "https://$vault.vault.azure.net/secrets/openai-api-key"

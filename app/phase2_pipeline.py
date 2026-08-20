@@ -29,10 +29,12 @@ def score_market_candidates(
     benchmark_candles: list[Candle],
     *,
     top_n: int = 50,
+    benchmark_symbol: str = "",
 ) -> list[MomentumSignal]:
+    benchmark_symbol = benchmark_symbol.strip().upper()
     scores: list[MomentumSignal] = []
     for symbol, candles in candle_map.items():
-        if symbol == "QQQ":
+        if benchmark_symbol and symbol == benchmark_symbol:
             continue
         if not _meets_min_average_volume(candles):
             continue

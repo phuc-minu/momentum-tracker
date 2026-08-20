@@ -11,7 +11,6 @@ DEFAULT_UNIVERSE = [
     "GOOGL",
     "AMZN",
     "TSLA",
-    "QQQ",
 ]
 
 SECTOR_UNIVERSE = {

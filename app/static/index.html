@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stock Momentum AI</title>
-    <link rel="stylesheet" href="/static/styles.css?v=202608191145" />
+    <link rel="stylesheet" href="/static/styles.css?v=202608191255" />
   </head>
   <body>
     <section id="loginScreen" class="login-screen" hidden>
@@ -30,7 +30,7 @@
         </div>
         <div class="topbar-actions">
           <div class="status-strip">
-            <span id="apiStatus" class="status-dot"></span>
+            <span id="apiStatus" class="status-dot loading"></span>
             <span id="apiStatusText">Checking</span>
           </div>
           <button id="logoutButton" class="secondary-button" type="button">Logout</button>
@@ -140,7 +140,7 @@
           </label>
           <label class="field">
             <span>Benchmark</span>
-            <input id="benchmarkInput" value="QQQ" />
+            <input id="benchmarkInput" value="" placeholder="Optional" />
           </label>
           <label class="field">
             <span>History</span>
@@ -214,6 +214,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=202608191145"></script>
+    <script src="/static/app.js?v=202608191255"></script>
   </body>
 </html>

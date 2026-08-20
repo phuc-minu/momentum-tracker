@@ -5,10 +5,10 @@ This is the Azure deployment scaffold for a momentum-first investing agent.
 ## App features
 
 - FastAPI service with health, universe, and scan endpoints
-- MarketData.app daily candle ingestion when `MARKETDATA_API_KEY` is configured
+- FMP daily candle ingestion when `FMP_API_KEY` is configured
 - Deterministic demo mode for local scanner development without API calls
 - Momentum score, grade, and setup classification for breakout, pullback, extended, base, or weak charts
-- QQQ-relative 3-month strength and explainable scoring factors
+- Optional benchmark-relative 3-month strength and explainable scoring factors
 
 ## Run locally
 
@@ -24,16 +24,16 @@ Try the deterministic scanner:
 Invoke-RestMethod "http://127.0.0.1:8000/scan?symbols=NVDA,MSFT,AAPL,AVGO&demo=true"
 ```
 
-Use live MarketData candles:
+Use live FMP candles:
 
 ```powershell
-$env:MARKETDATA_API_KEY="YOUR_MARKETDATA_TOKEN"
+$env:FMP_API_KEY="YOUR_FMP_TOKEN"
 Invoke-RestMethod "http://127.0.0.1:8000/scan?symbols=NVDA,MSFT,AAPL,AVGO"
 ```
 
-## MarketData credit controls
+## FMP Request Controls
 
-Live MarketData responses are cached on disk under `app/.cache/marketdata` by default. Historical dated bulk candles are cached without expiry; latest candle, option, news, and earnings responses use short TTLs so repeated dashboard scans do not repull the same provider data.
+Live FMP responses are cached on disk under `app/.cache/marketdata` by default. Historical dated candles are cached without expiry; latest quote, news, and earnings responses use short TTLs so repeated dashboard scans do not repull the same provider data.
 
 Useful settings:
 
@@ -42,21 +42,17 @@ $env:MARKETDATA_CACHE_DIR="C:\path\to\marketdata-cache"
 $env:MARKETDATA_LATEST_CACHE_SECONDS="300"
 $env:MARKETDATA_CANDLE_CACHE_SECONDS="900"
 $env:MARKETDATA_REFERENCE_CACHE_SECONDS="3600"
-$env:MARKETDATA_PROVIDER_CACHE="true"
-$env:MARKETDATA_PROVIDER_MAXAGE="5min"
-$env:MARKETDATA_OPTION_STRIKE_LIMIT="5"
-$env:MARKETDATA_OPTION_DTE="14"
+$env:FMP_BASE_URL="https://financialmodelingprep.com/stable/"
 $env:DISCOVERY_OPTIONS="true"
 ```
 
-`MARKETDATA_PROVIDER_CACHE=true` adds MarketData `mode=cached&maxage=5min` to option-chain requests when supported by the plan. Candle and bulk-candle endpoints use the app's local disk cache because MarketData cached mode is not available for those endpoints.
-`DISCOVERY_OPTIONS=true` enables put/call ratio, call volume, and preferred-contract enrichment in the discovery table.
+`DISCOVERY_OPTIONS=true` enables options enrichment when an FMP-compatible options endpoint is wired. Until then, options fields are returned as unavailable rather than calling the old MarketData provider.
 
 ## API
 
 - `GET /health` returns service and API-key configuration status
 - `GET /universe` returns the configured default universe
-- `GET /scan?symbols=NVDA,MSFT&benchmark=QQQ&demo=true` ranks symbols
+- `GET /scan?symbols=NVDA,MSFT&demo=true` ranks symbols
 - `GET /phase2/candidates` returns precomputed PostgreSQL-backed momentum candidates
 - `GET /phase2/status` returns the latest Phase 2 refresh job status
 - `POST /scan` accepts JSON:
@@ -64,7 +60,7 @@ $env:DISCOVERY_OPTIONS="true"
 ```json
 {
   "symbols": ["NVDA", "MSFT", "AAPL"],
-  "benchmark": "QQQ",
+  "benchmark": "",
   "countback": 260,
   "demo": true
 }
@@ -75,7 +71,7 @@ $env:DISCOVERY_OPTIONS="true"
 Phase 2 moves broad market discovery out of the click path:
 
 ```text
-MarketData daily candles -> PostgreSQL daily_bars -> momentum_scores -> top candidates -> FastAPI reads
+FMP daily candles -> PostgreSQL daily_bars -> momentum_scores -> top candidates -> FastAPI reads
 ```
 
 Configure PostgreSQL:
@@ -99,11 +95,11 @@ $env:PHASE2_SYMBOLS="NVDA,MSFT,AAPL,AVGO,AMD,META,GOOGL,AMZN,TSLA,SNDK,MU,WDC"
 $env:PHASE2_SYMBOL_LIMIT="200"
 $env:PHASE2_MIN_AVERAGE_VOLUME="3000000"
 $env:PHASE2_VOLUME_PREFILTER_DAYS="20"
-$env:PHASE2_MARKETDATA_CONCURRENCY="2"
+$env:PHASE2_FMP_CONCURRENCY="2"
 ..\.venv\Scripts\python.exe phase2_refresh.py --top 50
 ```
 
-For broader scheduled runs, use `PHASE2_SYMBOL_SOURCE=listed`. The refresh prefilters that broad list by 20-day average daily volume over `3,000,000` before fetching full historical candles, but keep `PHASE2_SYMBOL_LIMIT` conservative until you understand MarketData credit usage. Options and LLM enrichment should remain downstream-only for the top candidates.
+For broader scheduled runs, use `PHASE2_SYMBOL_SOURCE=fmp` to start from the FMP stock screener filtered by volume, or `PHASE2_SYMBOL_SOURCE=listed` to use Nasdaq Trader symbol files. The refresh also prefilters by 20-day average daily volume over `3,000,000` before fetching full historical candles, but keep `PHASE2_SYMBOL_LIMIT` conservative until you understand FMP usage. Options and LLM enrichment should remain downstream-only for the top candidates.
 
 ## Resources
 
@@ -119,7 +115,7 @@ From the VS Code terminal authenticated to the intended Azure subscription:
 
 ```powershell
 az account show
-$env:MARKETDATA_API_KEY="YOUR_MARKETDATA_TOKEN"
+$env:FMP_API_KEY="YOUR_FMP_TOKEN"
 $env:OPENAI_API_KEY="YOUR_OPENAI_API_KEY"
 ./deploy.ps1
 ```
@@ -128,7 +124,7 @@ Bash/Linux:
 
 ```bash
 az account show
-export MARKETDATA_API_KEY='YOUR_MARKETDATA_TOKEN'
+export FMP_API_KEY='YOUR_FMP_TOKEN'
 export OPENAI_API_KEY='YOUR_OPENAI_API_KEY'
 ./deploy.sh
 ```

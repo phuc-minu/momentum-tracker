@@ -37,7 +37,8 @@ async def no_cache_static_assets(request, call_next):
 def health():
     return {
         "status": "ok",
-        "marketdata_configured": bool(os.getenv("MARKETDATA_API_KEY")),
+        "marketdata_configured": bool(os.getenv("FMP_API_KEY") or os.getenv("MARKETDATA_API_KEY")),
+        "provider": "fmp",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
     }
 
@@ -115,9 +116,9 @@ def universe(_: None = Depends(require_auth)):
 @app.get("/scan", response_model=ScanResponse)
 async def scan(
     symbols: str | None = Query(default=None, description="Comma-separated tickers. Defaults to DEFAULT_UNIVERSE."),
-    benchmark: str = Query(default="QQQ", min_length=1),
+    benchmark: str = Query(default=""),
     countback: int = Query(default=260, ge=80, le=520),
-    demo: bool = Query(default=False, description="Use deterministic generated candles instead of live MarketData."),
+    demo: bool = Query(default=False, description="Use deterministic generated candles instead of live FMP data."),
     _: None = Depends(require_auth),
 ):
     request = ScanRequest(
@@ -192,22 +193,29 @@ def phase2_status(_: None = Depends(require_auth)):
 
 async def run_scan(request: ScanRequest) -> ScanResponse:
     benchmark = request.benchmark.strip().upper()
-    symbols = [symbol for symbol in dedupe_symbols(request.symbols) if symbol != benchmark]
+    symbols = [symbol for symbol in dedupe_symbols(request.symbols) if not benchmark or symbol != benchmark]
     if not symbols:
-        raise HTTPException(status_code=400, detail="At least one non-benchmark symbol is required")
+        raise HTTPException(status_code=400, detail="At least one symbol is required")
 
     try:
         if request.demo:
-            benchmark_candles = demo_candles(benchmark, request.countback)
+            benchmark_candles = demo_candles(benchmark, request.countback) if benchmark else []
             candle_map = {symbol: demo_candles(symbol, request.countback) for symbol in symbols}
             data_mode = "demo"
         else:
             client = MarketDataClient()
-            benchmark_candles, symbol_candles = await asyncio.gather(
-                client.candles(benchmark, request.countback),
-                _fetch_symbols(client, symbols, request.countback),
-            )
-            candle_map = dict(zip(symbols, symbol_candles, strict=True))
+            if not client.api_key:
+                raise MarketDataError("FMP_API_KEY is required for live market data")
+            if benchmark:
+                benchmark_candles, symbol_rows = await asyncio.gather(
+                    client.candles(benchmark, request.countback),
+                    _fetch_symbols(client, symbols, request.countback),
+                )
+            else:
+                benchmark_candles = []
+                symbol_rows = await _fetch_symbols(client, symbols, request.countback)
+            candle_map = {symbol: candles for symbol, candles, error in symbol_rows if candles and not error}
+            skipped_symbols = [symbol for symbol, candles, error in symbol_rows if error or not candles]
             data_mode = "live"
 
         results = [
@@ -215,6 +223,9 @@ async def run_scan(request: ScanRequest) -> ScanResponse:
             for symbol, candles in candle_map.items()
             if candles
         ]
+        skipped_symbols = skipped_symbols if not request.demo else []
+        if not results and skipped_symbols:
+            raise MarketDataError(f"FMP returned no usable candle data for {', '.join(skipped_symbols)}")
     except MarketDataError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except ValueError as error:
@@ -226,6 +237,7 @@ async def run_scan(request: ScanRequest) -> ScanResponse:
         count=len(results),
         results=results,
         data_mode=data_mode,
+        skipped_symbols=skipped_symbols,
     )
 
 
@@ -245,6 +257,9 @@ async def _fetch_symbols(client: MarketDataClient, symbols: list[str], countback
 
     async def fetch(symbol: str):
         async with semaphore:
-            return await client.candles(symbol, countback)
+            try:
+                return symbol, await client.candles(symbol, countback), None
+            except MarketDataError as error:
+                return symbol, [], str(error)
 
     return await asyncio.gather(*(fetch(symbol) for symbol in symbols))

@@ -43,6 +43,7 @@ const elements = {
 };
 
 class AuthRequiredError extends Error {}
+const DEFAULT_BUTTON_LABELS = new WeakMap();
 
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
@@ -67,6 +68,8 @@ function activateTab(tabId) {
 
 async function checkHealth() {
   try {
+    elements.apiStatus.className = "status-dot loading";
+    elements.apiStatusText.textContent = "Checking";
     const response = await fetch("/health");
     const payload = await response.json();
     state.liveDataAvailable = Boolean(payload.marketdata_configured);
@@ -98,7 +101,7 @@ async function checkAuth() {
 
 async function login(event) {
   event.preventDefault();
-  elements.loginButton.disabled = true;
+  setButtonLoading(elements.loginButton, true, "Checking");
   elements.loginMessage.textContent = "Checking";
 
   try {
@@ -116,7 +119,7 @@ async function login(event) {
   } catch (error) {
     elements.loginMessage.textContent = error.message;
   } finally {
-    elements.loginButton.disabled = false;
+    setButtonLoading(elements.loginButton, false);
   }
 }
 
@@ -131,8 +134,8 @@ function showLogin(message = "") {
   elements.dashboard.hidden = true;
   elements.loginScreen.hidden = false;
   elements.loginMessage.textContent = message;
-  elements.discoverButton.disabled = false;
-  elements.scanButton.disabled = false;
+  setButtonLoading(elements.discoverButton, false);
+  setButtonLoading(elements.scanButton, false);
   elements.passwordInput.focus();
 }
 
@@ -144,12 +147,12 @@ function showDashboard() {
 async function runScan() {
   const params = new URLSearchParams({
     symbols: elements.symbolsInput.value,
-    benchmark: elements.benchmarkInput.value || "QQQ",
+    benchmark: elements.benchmarkInput.value.trim(),
     countback: elements.countbackInput.value,
     demo: state.liveDataAvailable ? "false" : "true",
   });
 
-  elements.scanButton.disabled = true;
+  setButtonLoading(elements.scanButton, true, "Scanning");
   elements.scanMeta.textContent = "Scanning";
 
   try {
@@ -185,14 +188,14 @@ async function runScan() {
       drawScores();
     }
   } finally {
-    elements.scanButton.disabled = false;
+    setButtonLoading(elements.scanButton, false);
   }
 }
 
 async function runScanFallback(reason) {
   const params = new URLSearchParams({
     symbols: elements.symbolsInput.value,
-    benchmark: elements.benchmarkInput.value || "QQQ",
+    benchmark: elements.benchmarkInput.value.trim(),
     countback: elements.countbackInput.value,
     demo: "true",
   });
@@ -211,7 +214,7 @@ async function runScanFallback(reason) {
 
 async function runDiscover() {
   updateGrowthColumnHeader();
-  elements.discoverButton.disabled = true;
+  setButtonLoading(elements.discoverButton, true, "Loading");
   elements.discoverMeta.textContent = "Loading candidates";
 
   try {
@@ -231,7 +234,20 @@ async function runDiscover() {
       elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${error.message}</td></tr>`;
     }
   } finally {
-    elements.discoverButton.disabled = false;
+    setButtonLoading(elements.discoverButton, false);
+  }
+}
+
+function setButtonLoading(button, isLoading, label = "Loading") {
+  if (!DEFAULT_BUTTON_LABELS.has(button)) {
+    DEFAULT_BUTTON_LABELS.set(button, button.innerHTML);
+  }
+  button.disabled = isLoading;
+  button.setAttribute("aria-busy", isLoading ? "true" : "false");
+  if (isLoading) {
+    button.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${label}</span>`;
+  } else {
+    button.innerHTML = DEFAULT_BUTTON_LABELS.get(button);
   }
 }
 
@@ -426,7 +442,8 @@ function renderSummary(payload) {
   elements.averageScore.textContent = payload.results.length ? average.toFixed(1) : "--";
   elements.topSetup.textContent = payload.results[0]?.setup || "--";
   elements.dataMode.textContent = displayMode(payload.data_mode);
-  elements.scanMeta.textContent = `${payload.count} symbols vs ${payload.benchmark}`;
+  const skipped = payload.skipped_symbols?.length ? `, skipped ${payload.skipped_symbols.join(", ")}` : "";
+  elements.scanMeta.textContent = payload.benchmark ? `${payload.count} symbols vs ${payload.benchmark}${skipped}` : `${payload.count} symbols${skipped}`;
 }
 
 function renderModeNotice(message) {
@@ -436,10 +453,10 @@ function renderModeNotice(message) {
     return;
   }
   if (state.liveDataAvailable) {
-    elements.modeNotice.textContent = "Phase 2 mode: discovery reads precomputed PostgreSQL candidates; manual scanner still uses live MarketData.";
+    elements.modeNotice.textContent = "Phase 2 mode: discovery reads precomputed PostgreSQL candidates; manual scanner still uses live FMP data.";
     elements.modeNotice.className = "mode-notice live";
   } else {
-    elements.modeNotice.textContent = "Beta data mode: live MarketData is not configured yet, so displayed growth and options values are generated preview data.";
+    elements.modeNotice.textContent = "Beta data mode: live FMP data is not configured yet, so displayed growth and options values are generated preview data.";
     elements.modeNotice.className = "mode-notice beta";
   }
 }

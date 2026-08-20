@@ -14,7 +14,7 @@ class Candle(BaseModel):
 
 class ScanRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list)
-    benchmark: str = "QQQ"
+    benchmark: str = ""
     countback: int = Field(default=260, ge=80, le=520)
     demo: bool = False
 
@@ -48,6 +48,7 @@ class ScanResponse(BaseModel):
     count: int
     results: list[MomentumSignal]
     data_mode: Literal["live", "demo"]
+    skipped_symbols: list[str] = Field(default_factory=list)
 
 
 class NewsItem(BaseModel):

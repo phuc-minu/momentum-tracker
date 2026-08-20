@@ -51,7 +51,7 @@ async def discover_movers(
     else:
         client = MarketDataClient(timeout_seconds=30.0)
         if not client.api_key:
-            raise MarketDataError("MARKETDATA_API_KEY is required for live market data")
+            raise MarketDataError("FMP_API_KEY is required for live market data")
         candidates = await _discover_live_candidates(
             client,
             universe,
@@ -238,15 +238,11 @@ async def _gather_limited(coroutines, *, limit: int):
 
 
 def _live_discovery_universe() -> dict[str, str]:
-    return {
-        symbol: sector
-        for symbol, sector in discovery_universe().items()
-        if symbol != "QQQ"
-    }
+    return discovery_universe()
 
 
 def _live_request_concurrency() -> int:
-    raw = os.getenv("MARKETDATA_CONCURRENCY", "2")
+    raw = os.getenv("FMP_CONCURRENCY") or os.getenv("MARKETDATA_CONCURRENCY", "2")
     try:
         return max(1, min(int(raw), 5))
     except ValueError:

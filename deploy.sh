@@ -26,6 +26,10 @@ if [[ -n "${MARKETDATA_API_KEY:-}" ]]; then
   az keyvault secret set --vault-name "$vault" --name marketdata-api-key --value "$MARKETDATA_API_KEY" >/dev/null
 fi
 
+if [[ -n "${FMP_API_KEY:-}" ]]; then
+  az keyvault secret set --vault-name "$vault" --name fmp-api-key --value "$FMP_API_KEY" >/dev/null
+fi
+
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   az keyvault secret set --vault-name "$vault" --name openai-api-key --value "$OPENAI_API_KEY" >/dev/null
 fi
@@ -51,6 +55,10 @@ env_args=()
 if [[ -n "${MARKETDATA_API_KEY:-}" ]]; then
   secret_args+=("marketdata-api-key=keyvaultref:https://$vault.vault.azure.net/secrets/marketdata-api-key,identityref:$identity_id")
   env_args+=("MARKETDATA_API_KEY=secretref:marketdata-api-key")
+fi
+if [[ -n "${FMP_API_KEY:-}" ]]; then
+  secret_args+=("fmp-api-key=keyvaultref:https://$vault.vault.azure.net/secrets/fmp-api-key,identityref:$identity_id")
+  env_args+=("FMP_API_KEY=secretref:fmp-api-key")
 fi
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   secret_args+=("openai-api-key=keyvaultref:https://$vault.vault.azure.net/secrets/openai-api-key,identityref:$identity_id")

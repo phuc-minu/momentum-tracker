@@ -24,13 +24,13 @@ from universe import configured_universe
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh precomputed Phase 2 momentum candidates.")
-    parser.add_argument("--demo", action="store_true", help="Use generated candles instead of MarketData.")
-    parser.add_argument("--source", default=os.getenv("PHASE2_SYMBOL_SOURCE", "configured"), choices=["configured", "listed", "nasdaq"])
+    parser.add_argument("--demo", action="store_true", help="Use generated candles instead of FMP.")
+    parser.add_argument("--source", default=os.getenv("PHASE2_SYMBOL_SOURCE", "configured"), choices=["configured", "listed", "nasdaq", "fmp"])
     parser.add_argument("--symbol-limit", type=int, default=int(os.getenv("PHASE2_SYMBOL_LIMIT", "500")))
     parser.add_argument("--top", type=int, default=int(os.getenv("PHASE2_TOP_N", "50")))
     parser.add_argument("--countback", type=int, default=int(os.getenv("PHASE2_COUNTBACK", "260")))
-    parser.add_argument("--benchmark", default=os.getenv("PHASE2_BENCHMARK", "QQQ"))
-    parser.add_argument("--concurrency", type=int, default=int(os.getenv("PHASE2_MARKETDATA_CONCURRENCY", "2")))
+    parser.add_argument("--benchmark", default=os.getenv("PHASE2_BENCHMARK", ""))
+    parser.add_argument("--concurrency", type=int, default=int(os.getenv("PHASE2_FMP_CONCURRENCY") or os.getenv("PHASE2_MARKETDATA_CONCURRENCY", "2")))
     parser.add_argument("--options-concurrency", type=int, default=int(os.getenv("PHASE2_OPTIONS_CONCURRENCY", "2")))
     parser.add_argument("--min-average-volume", type=int, default=int(os.getenv("PHASE2_MIN_AVERAGE_VOLUME", str(MIN_AVERAGE_DAILY_VOLUME))))
     parser.add_argument("--volume-prefilter-days", type=int, default=int(os.getenv("PHASE2_VOLUME_PREFILTER_DAYS", "20")))
@@ -50,7 +50,7 @@ async def main() -> None:
             concurrency=args.concurrency,
         )
     benchmark = args.benchmark.strip().upper()
-    if benchmark not in {item["symbol"] for item in symbols}:
+    if benchmark and benchmark not in {item["symbol"] for item in symbols}:
         symbols.append(phase2_symbol(benchmark, name=benchmark, exchange="benchmark", sector="Benchmark"))
 
     with connect() as connection:
@@ -73,8 +73,10 @@ async def main() -> None:
             ]
             upsert_daily_bars(connection, bars)
 
-            benchmark_candles = candle_map.get(benchmark) or demo_candles(benchmark, args.countback)
-            scores = score_market_candidates(candle_map, benchmark_candles, top_n=args.top)
+            benchmark_candles = candle_map.get(benchmark) if benchmark else []
+            if benchmark and not benchmark_candles:
+                benchmark_candles = demo_candles(benchmark, args.countback)
+            scores = score_market_candidates(candle_map, benchmark_candles or [], top_n=args.top, benchmark_symbol=benchmark)
             upsert_momentum_scores(
                 connection,
                 run_id,
@@ -99,7 +101,7 @@ def _load_symbols(args: argparse.Namespace) -> list[dict[str, Any]]:
         return [
             phase2_symbol(symbol, name=symbol, exchange="demo")
             for symbol in configured_universe()
-            if symbol != args.benchmark.strip().upper()
+            if not args.benchmark.strip().upper() or symbol != args.benchmark.strip().upper()
         ][: args.symbol_limit]
     return load_phase2_symbols(source=args.source, limit=args.symbol_limit)
 
@@ -113,7 +115,7 @@ async def _filter_symbols_by_average_volume(
 ) -> list[dict[str, Any]]:
     client = MarketDataClient(timeout_seconds=30.0)
     if not client.api_key:
-        raise MarketDataError("MARKETDATA_API_KEY is required for Phase 2 live refresh")
+        raise MarketDataError("FMP_API_KEY is required for Phase 2 live refresh")
 
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 
@@ -141,13 +143,13 @@ async def _fetch_candles(
     demo: bool,
     concurrency: int,
 ) -> dict[str, list]:
-    unique_symbols = list(dict.fromkeys([benchmark, *symbols]))
+    unique_symbols = list(dict.fromkeys([symbol for symbol in [benchmark, *symbols] if symbol]))
     if demo:
         return {symbol: demo_candles(symbol, countback) for symbol in unique_symbols}
 
     client = MarketDataClient(timeout_seconds=30.0)
     if not client.api_key:
-        raise MarketDataError("MARKETDATA_API_KEY is required for Phase 2 live refresh")
+        raise MarketDataError("FMP_API_KEY is required for Phase 2 live refresh")
 
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 
@@ -174,7 +176,7 @@ async def _score_options(
 
     client = MarketDataClient(timeout_seconds=30.0)
     if not client.api_key:
-        raise MarketDataError("MARKETDATA_API_KEY is required for Phase 2 live options refresh")
+        raise MarketDataError("FMP_API_KEY is required for Phase 2 live options refresh")
 
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 

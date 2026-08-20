@@ -20,7 +20,7 @@ class MarketDataCache:
         self.cache_dir = cache_dir or Path(os.getenv("MARKETDATA_CACHE_DIR", Path(__file__).parent / ".cache" / "marketdata"))
         self.enabled = os.getenv("MARKETDATA_CACHE_DISABLED", "").strip().lower() not in {"1", "true", "yes", "on"}
 
-    def get(self, key: str, ttl_seconds: int | None) -> dict[str, Any] | None:
+    def get(self, key: str, ttl_seconds: int | None) -> Any | None:
         if not self.enabled:
             return None
 
@@ -36,10 +36,9 @@ class MarketDataCache:
             if datetime.now(UTC).timestamp() - fetched_at > ttl_seconds:
                 return None
 
-        payload = cached.get("payload")
-        return payload if isinstance(payload, dict) else None
+        return cached.get("payload")
 
-    def set(self, key: str, payload: dict[str, Any]) -> None:
+    def set(self, key: str, payload: Any) -> None:
         if not self.enabled:
             return
 
@@ -68,28 +67,21 @@ class MarketDataCache:
 
 class MarketDataClient:
     def __init__(self, api_key: str | None = None, timeout_seconds: float = 20.0, cache: MarketDataCache | None = None):
-        self.api_key = api_key or os.getenv("MARKETDATA_API_KEY")
+        self.api_key = api_key or os.getenv("FMP_API_KEY") or os.getenv("MARKETDATA_API_KEY")
+        self.base_url = os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com/stable/").rstrip("/") + "/"
         self.timeout_seconds = timeout_seconds
         self.cache = cache or MarketDataCache()
 
     async def candles(self, symbol: str, countback: int = 260, resolution: str = "D") -> list[Candle]:
         if not self.api_key:
-            raise MarketDataError("MARKETDATA_API_KEY is required for live market data")
+            raise MarketDataError("FMP_API_KEY is required for live market data")
 
         payload = await self._get(
-            f"https://api.marketdata.app/v1/stocks/candles/{resolution}/{symbol}/",
-            {"countback": countback},
+            self._url("historical-price-eod/full"),
+            {"symbol": symbol, "from": _from_date_for_countback(countback)},
             cache_ttl_seconds=_cache_ttl("MARKETDATA_CANDLE_CACHE_SECONDS", 900),
         )
-
-        status = payload.get("s")
-        if status == "no_data":
-            return []
-        if status != "ok":
-            message = payload.get("errmsg", f"Unexpected MarketData status: {status}")
-            raise MarketDataError(message)
-
-        return _parse_marketdata_candles(payload)
+        return _parse_fmp_historical_payload(payload)[-countback:]
 
     async def bulk_candles(
         self,
@@ -99,79 +91,51 @@ class MarketDataClient:
         resolution: str = "D",
     ) -> dict[str, Candle]:
         if not self.api_key:
-            raise MarketDataError("MARKETDATA_API_KEY is required for live market data")
+            raise MarketDataError("FMP_API_KEY is required for live market data")
         if not symbols:
             return {}
 
-        params = {"symbols": ",".join(symbols)}
-        if date:
-            params["date"] = date
-        payload = await self._get(
-            f"https://api.marketdata.app/v1/stocks/bulkcandles/{resolution}/",
-            params,
-            cache_ttl_seconds=None if date else _cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
-        )
-        if payload.get("s") == "no_data":
-            return {}
-        if payload.get("s") != "ok":
-            raise MarketDataError(payload.get("errmsg", f"Unexpected bulk candles status: {payload.get('s')}"))
-        return _parse_marketdata_bulk_candles(payload)
+        if not date:
+            return await self._latest_quotes_as_candles(symbols)
+
+        return await self._historical_date_as_candles(symbols, date)
 
     async def earnings(self, symbol: str, countback: int = 2) -> list[dict]:
         if not self.api_key:
-            raise MarketDataError("MARKETDATA_API_KEY is required for live earnings data")
+            raise MarketDataError("FMP_API_KEY is required for live earnings data")
 
         payload = await self._get(
-            f"https://api.marketdata.app/v1/stocks/earnings/{symbol}/",
-            {"countback": countback},
+            self._url("earnings"),
+            {"symbol": symbol, "limit": countback},
             cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
         )
-        if payload.get("s") == "no_data":
-            return []
-        if payload.get("s") != "ok":
-            raise MarketDataError(payload.get("errmsg", f"Unexpected earnings status: {payload.get('s')}"))
-        return _unpack_columnar_payload(payload)
+        return _as_rows(payload)[:countback]
 
     async def news(self, symbol: str, countback: int = 5) -> list[NewsItem]:
         if not self.api_key:
-            raise MarketDataError("MARKETDATA_API_KEY is required for live news data")
+            raise MarketDataError("FMP_API_KEY is required for live news data")
 
         payload = await self._get(
-            f"https://api.marketdata.app/v1/stocks/news/{symbol}/",
-            {"countback": countback},
+            self._url("news/stock"),
+            {"symbols": symbol, "limit": countback},
             cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
         )
-        if payload.get("s") == "no_data":
-            return []
-        if payload.get("s") != "ok":
-            raise MarketDataError(payload.get("errmsg", f"Unexpected news status: {payload.get('s')}"))
-        rows = _unpack_columnar_payload(payload)
+        rows = _as_rows(payload)
         return [
             NewsItem(
-                headline=str(row.get("headline", "")),
-                source=row.get("source"),
-                publication_date=row.get("publicationDate"),
+                headline=str(row.get("title") or row.get("headline") or ""),
+                source=row.get("publisher") or row.get("site") or row.get("source"),
+                publication_date=row.get("publishedDate") or row.get("date") or row.get("publicationDate"),
             )
             for row in rows
-            if row.get("headline")
+            if row.get("title") or row.get("headline")
         ]
 
     async def put_call_ratio(self, symbol: str) -> tuple[float | None, str]:
         if not self.api_key:
-            raise MarketDataError("MARKETDATA_API_KEY is required for live options data")
+            raise MarketDataError("FMP_API_KEY is required for live options data")
 
-        payload = await self._get(
-            f"https://api.marketdata.app/v1/options/chain/{symbol}/",
-            _option_chain_params(),
-            cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
-        )
-        status = _payload_status(payload)
-        if status == "no_data":
-            return None, "unavailable"
-        if status != "ok":
-            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {status}"))
-
-        rows = _unpack_columnar_payload(payload)
+        rows = await self.option_chain(symbol)
         volume_ratio = _put_call_ratio_from_rows(rows, "volume")
         if volume_ratio is not None:
             return volume_ratio, "volume"
@@ -183,45 +147,64 @@ class MarketDataClient:
 
     async def option_chain(self, symbol: str) -> list[dict]:
         if not self.api_key:
-            raise MarketDataError("MARKETDATA_API_KEY is required for live options data")
+            raise MarketDataError("FMP_API_KEY is required for live options data")
+        return []
 
-        payload = await self._get(
-            f"https://api.marketdata.app/v1/options/chain/{symbol}/",
-            _option_chain_params(),
-            cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
-        )
-        status = _payload_status(payload)
-        if status == "no_data":
-            return []
-        if status != "ok":
-            raise MarketDataError(payload.get("errmsg", f"Unexpected option chain status: {status}"))
-        return _unpack_columnar_payload(payload)
-
-    async def _get(self, url: str, params: dict, *, cache_ttl_seconds: int | None = 300) -> dict:
-        cache_key = _cache_key(url, params)
+    async def _get(self, url: str, params: dict, *, cache_ttl_seconds: int | None = 300) -> Any:
+        request_params = {**params, "apikey": self.api_key}
+        cache_key = _cache_key(url, request_params)
         cached_payload = self.cache.get(cache_key, cache_ttl_seconds)
         if cached_payload is not None:
             return cached_payload
 
-        headers = {"Authorization": f"Bearer {self.api_key}"}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             try:
-                response = await client.get(url, headers=headers, params=params)
+                response = await client.get(url, params=request_params)
                 response.raise_for_status()
             except httpx.HTTPStatusError as error:
                 raise MarketDataError(_http_error_message(error)) from error
             except httpx.TimeoutException as error:
-                raise MarketDataError("MarketData request timed out") from error
+                raise MarketDataError("FMP request timed out") from error
             except httpx.HTTPError as error:
-                raise MarketDataError(f"MarketData request failed: {error}") from error
+                raise MarketDataError(f"FMP request failed: {error}") from error
             if response.status_code == 204:
                 payload = {"s": "no_data"}
             else:
                 payload = response.json()
 
-        if isinstance(payload, dict):
+        if isinstance(payload, (dict, list)):
             self.cache.set(cache_key, payload)
         return payload
+
+    def _url(self, path: str) -> str:
+        return f"{self.base_url}{path.lstrip('/')}"
+
+    async def _latest_quotes_as_candles(self, symbols: list[str]) -> dict[str, Candle]:
+        candles = {}
+        for batch in _chunks(symbols, int(os.getenv("FMP_QUOTE_BATCH_SIZE", "100"))):
+            payload = await self._get(
+                self._url("quote"),
+                {"symbol": ",".join(batch)},
+                cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
+            )
+            for row in _as_rows(payload):
+                candle = _fmp_quote_to_candle(row)
+                if candle:
+                    candles[str(row.get("symbol", "")).upper()] = candle
+        return candles
+
+    async def _historical_date_as_candles(self, symbols: list[str], date: str) -> dict[str, Candle]:
+        candles = {}
+        for symbol in symbols:
+            payload = await self._get(
+                self._url("historical-price-eod/full"),
+                {"symbol": symbol, "from": date, "to": date},
+                cache_ttl_seconds=None,
+            )
+            rows = _parse_fmp_historical_payload(payload)
+            if rows:
+                candles[symbol.upper()] = rows[-1]
+        return candles
 
 
 def _cache_key(url: str, params: dict) -> str:
@@ -242,32 +225,70 @@ def _cache_ttl(name: str, default_seconds: int) -> int:
         return default_seconds
 
 
-def _provider_cached_mode_enabled() -> bool:
-    return os.getenv("MARKETDATA_PROVIDER_CACHE", "true").strip().lower() in {"1", "true", "yes", "on"}
+def _from_date_for_countback(countback: int) -> str:
+    calendar_days = max(countback * 2, countback + 30)
+    return (datetime.now(UTC).date() - timedelta(days=calendar_days)).isoformat()
 
 
-def _option_chain_params() -> dict[str, str]:
-    params = {
-        "monthly": "false",
-        "strikeLimit": os.getenv("MARKETDATA_OPTION_STRIKE_LIMIT", "5"),
-        "columns": "s,optionSymbol,symbol,expiration,strike,side,bid,ask,mid,delta,openInterest,volume",
-    }
-    if _provider_cached_mode_enabled():
-        params["mode"] = "cached"
-        params["maxage"] = os.getenv("MARKETDATA_PROVIDER_MAXAGE", "5min")
-    expiration = os.getenv("MARKETDATA_OPTION_EXPIRATION")
-    if expiration:
-        params["expiration"] = expiration
-    else:
-        params["dte"] = os.getenv("MARKETDATA_OPTION_DTE", "14")
-    return params
+def _chunks(items: list[str], size: int):
+    size = max(1, size)
+    for index in range(0, len(items), size):
+        yield items[index : index + size]
 
 
-def _payload_status(payload: dict) -> str | None:
-    status = payload.get("s")
-    if status:
-        return str(status)
-    return "ok" if any(isinstance(value, list) for value in payload.values()) else None
+def _as_rows(payload: Any) -> list[dict]:
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        for key in ("historical", "data", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [row for row in value if isinstance(row, dict)]
+        if payload.get("symbol"):
+            return [payload]
+    return []
+
+
+def _parse_fmp_historical_payload(payload: Any) -> list[Candle]:
+    rows = _as_rows(payload)
+    candles = [_fmp_historical_row_to_candle(row) for row in rows]
+    return sorted((candle for candle in candles if candle), key=lambda candle: candle.timestamp)
+
+
+def _fmp_historical_row_to_candle(row: dict) -> Candle | None:
+    date_value = row.get("date")
+    if not date_value:
+        return None
+    try:
+        timestamp = int(datetime.fromisoformat(str(date_value)[:10]).replace(tzinfo=UTC).timestamp())
+        return Candle(
+            timestamp=timestamp,
+            open=float(row.get("open")),
+            high=float(row.get("high")),
+            low=float(row.get("low")),
+            close=float(row.get("adjClose") or row.get("close")),
+            volume=int(float(row.get("volume") or 0)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmp_quote_to_candle(row: dict) -> Candle | None:
+    price = row.get("price") or row.get("close")
+    if price is None:
+        return None
+    timestamp = row.get("timestamp")
+    try:
+        return Candle(
+            timestamp=int(timestamp) if timestamp else int(datetime.now(UTC).timestamp()),
+            open=float(row.get("open") or price),
+            high=float(row.get("dayHigh") or row.get("high") or price),
+            low=float(row.get("dayLow") or row.get("low") or price),
+            close=float(price),
+            volume=int(float(row.get("volume") or 0)),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _http_error_message(error: httpx.HTTPStatusError) -> str:
@@ -277,11 +298,11 @@ def _http_error_message(error: httpx.HTTPStatusError) -> str:
     if status_code == 429:
         details = ". ".join(item for item in [provider_message, rate_limit] if item)
         suffix = f" {details}" if details else ""
-        return f"MarketData rate limit reached.{suffix}"
+        return f"FMP rate limit reached.{suffix}"
     if status_code == 403:
-        return "MarketData access is temporarily blocked. The provider allows one active device/IP per token; wait a few minutes before retrying from Azure."
+        return "FMP access is forbidden. Check the FMP API key and plan entitlement."
     suffix = f": {provider_message}" if provider_message else ""
-    return f"MarketData returned HTTP {status_code}{suffix}"
+    return f"FMP returned HTTP {status_code}{suffix}"
 
 
 def _provider_error_message(response: httpx.Response) -> str:
@@ -309,73 +330,6 @@ def _rate_limit_summary(response: httpx.Response) -> str:
     if reset is not None:
         pieces.append(f"reset={reset}")
     return f"Rate limit headers: {', '.join(pieces)}." if pieces else ""
-
-
-def _parse_marketdata_candles(payload: dict) -> list[Candle]:
-    timestamps = payload.get("t", [])
-    opens = payload.get("o", [])
-    highs = payload.get("h", [])
-    lows = payload.get("l", [])
-    closes = payload.get("c", [])
-    volumes = payload.get("v", [])
-
-    candles: list[Candle] = []
-    for index, timestamp in enumerate(timestamps):
-        candles.append(
-            Candle(
-                timestamp=int(timestamp),
-                open=float(opens[index]),
-                high=float(highs[index]),
-                low=float(lows[index]),
-                close=float(closes[index]),
-                volume=int(volumes[index]) if index < len(volumes) and volumes[index] is not None else 0,
-            )
-        )
-    return candles
-
-
-def _parse_marketdata_bulk_candles(payload: dict) -> dict[str, Candle]:
-    symbols = payload.get("symbol", [])
-    opens = payload.get("o", [])
-    highs = payload.get("h", [])
-    lows = payload.get("l", [])
-    closes = payload.get("c", [])
-    volumes = payload.get("v", [])
-    timestamps = payload.get("t", [])
-
-    candles: dict[str, Candle] = {}
-    for index, symbol in enumerate(symbols):
-        if index >= len(closes) or closes[index] is None:
-            continue
-        candles[str(symbol).upper()] = Candle(
-            timestamp=int(timestamps[index]),
-            open=float(opens[index]),
-            high=float(highs[index]),
-            low=float(lows[index]),
-            close=float(closes[index]),
-            volume=int(volumes[index]) if index < len(volumes) and volumes[index] is not None else 0,
-        )
-    return candles
-
-
-def _unpack_columnar_payload(payload: dict) -> list[dict]:
-    columns = {
-        key: value
-        for key, value in payload.items()
-        if isinstance(value, list) and key != "s"
-    }
-    if not columns:
-        return []
-    row_count = max(len(value) for value in columns.values())
-    rows: list[dict] = []
-    for index in range(row_count):
-        rows.append(
-            {
-                key: value[index] if index < len(value) else None
-                for key, value in columns.items()
-            }
-        )
-    return rows
 
 
 def _put_call_ratio_from_rows(rows: list[dict], metric: str) -> float | None:
