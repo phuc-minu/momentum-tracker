@@ -52,30 +52,24 @@ az containerapp registry set -n "$app" -g "$RESOURCE_GROUP" --server "$acr_login
 
 secret_args=()
 env_args=()
-if [[ -n "${MARKETDATA_API_KEY:-}" ]]; then
-  secret_args+=("marketdata-api-key=keyvaultref:https://$vault.vault.azure.net/secrets/marketdata-api-key,identityref:$identity_id")
-  env_args+=("MARKETDATA_API_KEY=secretref:marketdata-api-key")
-fi
-if [[ -n "${FMP_API_KEY:-}" ]]; then
-  secret_args+=("fmp-api-key=keyvaultref:https://$vault.vault.azure.net/secrets/fmp-api-key,identityref:$identity_id")
-  env_args+=("FMP_API_KEY=secretref:fmp-api-key")
-fi
-if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-  secret_args+=("openai-api-key=keyvaultref:https://$vault.vault.azure.net/secrets/openai-api-key,identityref:$identity_id")
-  env_args+=("OPENAI_API_KEY=secretref:openai-api-key")
-fi
-if [[ -n "${APP_PASSWORD:-}" ]]; then
-  secret_args+=("app-password=keyvaultref:https://$vault.vault.azure.net/secrets/app-password,identityref:$identity_id")
-  env_args+=("APP_PASSWORD=secretref:app-password")
-fi
-if [[ -n "${APP_SESSION_SECRET:-}" ]]; then
-  secret_args+=("app-session-secret=keyvaultref:https://$vault.vault.azure.net/secrets/app-session-secret,identityref:$identity_id")
-  env_args+=("APP_SESSION_SECRET=secretref:app-session-secret")
-fi
-if [[ -n "${DATABASE_URL:-}" ]]; then
-  secret_args+=("database-url=keyvaultref:https://$vault.vault.azure.net/secrets/database-url,identityref:$identity_id")
-  env_args+=("DATABASE_URL=secretref:database-url")
-fi
+
+add_secret_env_if_present() {
+  local secret_name="$1"
+  local env_name="$2"
+  local secret_id
+  secret_id="$(az keyvault secret show --vault-name "$vault" --name "$secret_name" --query id -o tsv 2>/dev/null || true)"
+  if [[ -n "$secret_id" ]]; then
+    secret_args+=("$secret_name=keyvaultref:$secret_id,identityref:$identity_id")
+    env_args+=("$env_name=secretref:$secret_name")
+  fi
+}
+
+add_secret_env_if_present "marketdata-api-key" "MARKETDATA_API_KEY"
+add_secret_env_if_present "fmp-api-key" "FMP_API_KEY"
+add_secret_env_if_present "openai-api-key" "OPENAI_API_KEY"
+add_secret_env_if_present "app-password" "APP_PASSWORD"
+add_secret_env_if_present "app-session-secret" "APP_SESSION_SECRET"
+add_secret_env_if_present "database-url" "DATABASE_URL"
 
 if [[ ${#secret_args[@]} -gt 0 ]]; then
   az containerapp secret set -n "$app" -g "$RESOURCE_GROUP" --secrets "${secret_args[@]}" >/dev/null

@@ -77,36 +77,26 @@ $secretArgs = @()
 $envArgs = @()
 $discoveryOptions = if ($env:DISCOVERY_OPTIONS) { $env:DISCOVERY_OPTIONS } else { "true" }
 $envArgs += "DISCOVERY_OPTIONS=$discoveryOptions"
-if ($env:MARKETDATA_API_KEY) {
-  $marketSecretUri = "https://$vault.vault.azure.net/secrets/marketdata-api-key"
-  $secretArgs += "marketdata-api-key=keyvaultref:$marketSecretUri,identityref:$identityId"
-  $envArgs += "MARKETDATA_API_KEY=secretref:marketdata-api-key"
+
+function Add-SecretEnvIfPresent {
+  param(
+    [string]$SecretName,
+    [string]$EnvName
+  )
+
+  $secretId = az keyvault secret show --vault-name $vault --name $SecretName --query id -o tsv 2>$null
+  if ($secretId) {
+    $script:secretArgs += "$SecretName=keyvaultref:$secretId,identityref:$identityId"
+    $script:envArgs += "$EnvName=secretref:$SecretName"
+  }
 }
-if ($env:FMP_API_KEY) {
-  $fmpSecretUri = "https://$vault.vault.azure.net/secrets/fmp-api-key"
-  $secretArgs += "fmp-api-key=keyvaultref:$fmpSecretUri,identityref:$identityId"
-  $envArgs += "FMP_API_KEY=secretref:fmp-api-key"
-}
-if ($env:OPENAI_API_KEY) {
-  $openaiSecretUri = "https://$vault.vault.azure.net/secrets/openai-api-key"
-  $secretArgs += "openai-api-key=keyvaultref:$openaiSecretUri,identityref:$identityId"
-  $envArgs += "OPENAI_API_KEY=secretref:openai-api-key"
-}
-if ($env:APP_PASSWORD) {
-  $appPasswordSecretUri = "https://$vault.vault.azure.net/secrets/app-password"
-  $secretArgs += "app-password=keyvaultref:$appPasswordSecretUri,identityref:$identityId"
-  $envArgs += "APP_PASSWORD=secretref:app-password"
-}
-if ($env:APP_SESSION_SECRET) {
-  $appSessionSecretUri = "https://$vault.vault.azure.net/secrets/app-session-secret"
-  $secretArgs += "app-session-secret=keyvaultref:$appSessionSecretUri,identityref:$identityId"
-  $envArgs += "APP_SESSION_SECRET=secretref:app-session-secret"
-}
-if ($env:DATABASE_URL) {
-  $databaseUrlSecretUri = "https://$vault.vault.azure.net/secrets/database-url"
-  $secretArgs += "database-url=keyvaultref:$databaseUrlSecretUri,identityref:$identityId"
-  $envArgs += "DATABASE_URL=secretref:database-url"
-}
+
+Add-SecretEnvIfPresent "marketdata-api-key" "MARKETDATA_API_KEY"
+Add-SecretEnvIfPresent "fmp-api-key" "FMP_API_KEY"
+Add-SecretEnvIfPresent "openai-api-key" "OPENAI_API_KEY"
+Add-SecretEnvIfPresent "app-password" "APP_PASSWORD"
+Add-SecretEnvIfPresent "app-session-secret" "APP_SESSION_SECRET"
+Add-SecretEnvIfPresent "database-url" "DATABASE_URL"
 
 if ($secretArgs.Count -gt 0) {
   az containerapp secret set --name $app --resource-group $ResourceGroup --secrets $secretArgs --output none

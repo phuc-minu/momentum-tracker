@@ -112,6 +112,14 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
               value: '50'
             }
             {
+              name: 'PHASE2_MOVER_LIMIT'
+              value: '50'
+            }
+            {
+              name: 'PHASE2_PRICE_MOVEMENT_DAYS'
+              value: '30'
+            }
+            {
               name: 'PHASE2_COUNTBACK'
               value: '260'
             }

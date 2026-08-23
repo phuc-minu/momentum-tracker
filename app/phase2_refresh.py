@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
 from marketdata import MarketDataClient, MarketDataError, demo_candles
@@ -10,6 +11,7 @@ from options_activity import analyze_options_activity, demo_options_activity
 from phase2_db import (
     connect,
     create_refresh_run,
+    fetch_recent_daily_bars,
     finish_refresh_run,
     init_db,
     prune_scores_for_run,
@@ -20,6 +22,7 @@ from phase2_db import (
 )
 from phase2_pipeline import MIN_AVERAGE_DAILY_VOLUME, MIN_STOCK_PRICE, candles_to_bars, momentum_signal_to_db, score_market_candidates
 from phase2_pipeline import phase2_symbol
+from schemas import Candle
 from symbol_source import load_phase2_symbols
 from universe import configured_universe
 
@@ -30,6 +33,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", default=os.getenv("PHASE2_SYMBOL_SOURCE", "fmp"), choices=["configured", "listed", "nasdaq", "fmp"])
     parser.add_argument("--symbol-limit", type=int, default=int(os.getenv("PHASE2_SYMBOL_LIMIT", "500")))
     parser.add_argument("--top", type=int, default=int(os.getenv("PHASE2_TOP_N", "50")))
+    parser.add_argument("--mover-limit", type=int, default=int(os.getenv("PHASE2_MOVER_LIMIT", "50")))
+    parser.add_argument("--price-movement-days", type=int, default=int(os.getenv("PHASE2_PRICE_MOVEMENT_DAYS", "30")))
     parser.add_argument("--countback", type=int, default=int(os.getenv("PHASE2_COUNTBACK", "260")))
     parser.add_argument("--benchmark", default=os.getenv("PHASE2_BENCHMARK", ""))
     parser.add_argument("--concurrency", type=int, default=int(os.getenv("PHASE2_FMP_CONCURRENCY") or os.getenv("PHASE2_MARKETDATA_CONCURRENCY", "2")))
@@ -42,17 +47,23 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = parse_args()
+    if not args.demo and args.source != "fmp":
+        raise SystemExit("Live Phase 2 refresh must use PHASE2_SYMBOL_SOURCE=fmp")
     symbols = _load_symbols(args)
     if not symbols:
         raise SystemExit("No symbols configured. Set PHASE2_SYMBOLS or use --source listed.")
     if not args.demo and args.min_average_volume > 0:
-        symbols = await _filter_symbols_by_average_volume(
+        symbols = await _filter_symbols_by_price_movement(
             symbols,
             min_average_volume=args.min_average_volume,
             min_price=args.min_price,
-            days=args.volume_prefilter_days,
+            volume_days=args.volume_prefilter_days,
+            movement_days=args.price_movement_days,
+            limit=args.mover_limit,
             concurrency=args.concurrency,
         )
+        if not symbols:
+            raise MarketDataError("No symbols met the 30-day price movement requirements")
     benchmark = args.benchmark.strip().upper()
     if benchmark and benchmark not in {item["symbol"] for item in symbols}:
         symbols.append(phase2_symbol(benchmark, name=benchmark, exchange="benchmark", sector="Benchmark"))
@@ -76,12 +87,34 @@ async def main() -> None:
                 for bar in candles_to_bars(symbol, candles)
             ]
             upsert_daily_bars(connection, bars)
+            unresolved_symbols = _apply_stored_candle_fallback(
+                connection,
+                candle_map,
+                [item["symbol"] for item in symbols],
+                countback=args.countback,
+            )
+            if unresolved_symbols:
+                raise MarketDataError(
+                    "No complete candle history available for "
+                    f"{', '.join(unresolved_symbols[:20])}"
+                    + (f" and {len(unresolved_symbols) - 20} more" if len(unresolved_symbols) > 20 else "")
+                )
 
             benchmark_candles = candle_map.get(benchmark) if benchmark else []
             if benchmark and not benchmark_candles:
-                benchmark_candles = demo_candles(benchmark, args.countback)
-            scores = score_market_candidates(
+                raise MarketDataError(f"No complete candle history available for benchmark {benchmark}")
+            mover_symbols = _select_top_price_mover_symbols(
                 candle_map,
+                [item["symbol"] for item in symbols],
+                limit=args.mover_limit,
+                movement_days=args.price_movement_days,
+                min_price=args.min_price,
+                min_average_volume=args.min_average_volume,
+            )
+            if not mover_symbols:
+                raise MarketDataError("No symbols met the 30-day price movement requirements")
+            scores = score_market_candidates(
+                {symbol: candle_map[symbol] for symbol in mover_symbols if symbol in candle_map},
                 benchmark_candles or [],
                 top_n=args.top,
                 benchmark_symbol=benchmark,
@@ -150,6 +183,44 @@ async def _filter_symbols_by_average_volume(
     return [item for item in rows if item]
 
 
+async def _filter_symbols_by_price_movement(
+    symbols: list[dict[str, Any]],
+    *,
+    min_average_volume: int,
+    min_price: float = MIN_STOCK_PRICE,
+    volume_days: int,
+    movement_days: int,
+    limit: int,
+    concurrency: int,
+) -> list[dict[str, Any]]:
+    client = MarketDataClient(timeout_seconds=30.0)
+    if not client.api_key:
+        raise MarketDataError("FMP_API_KEY is required for Phase 2 live refresh")
+
+    countback = max(volume_days, movement_days + 10, 40)
+    semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
+
+    async def price_movement(item: dict[str, Any]) -> tuple[dict[str, Any], float] | None:
+        symbol = item["symbol"]
+        async with semaphore:
+            candles = await _fetch_symbol_candles_with_retry(client, symbol, countback=countback)
+        if not candles:
+            return None
+        if candles[-1].close <= min_price:
+            return None
+        if not _meets_average_volume(candles, min_average_volume, days=volume_days):
+            return None
+        return_value = _calendar_day_return(candles, movement_days)
+        if return_value is None:
+            return None
+        return item, return_value
+
+    rows = await asyncio.gather(*(price_movement(item) for item in symbols))
+    movers = [row for row in rows if row is not None]
+    movers.sort(key=lambda row: (-row[1], row[0]["symbol"]))
+    return [item for item, _return_value in movers[:limit]]
+
+
 async def _fetch_candles(
     *,
     symbols: list[str],
@@ -170,13 +241,148 @@ async def _fetch_candles(
 
     async def fetch(symbol: str):
         async with semaphore:
-            try:
-                return symbol, await client.candles(symbol, countback=countback)
-            except MarketDataError:
-                return symbol, []
+            return symbol, await _fetch_symbol_candles_with_retry(client, symbol, countback=countback)
 
     rows = await asyncio.gather(*(fetch(symbol) for symbol in unique_symbols))
     return {symbol: candles for symbol, candles in rows if candles}
+
+
+async def _fetch_symbol_candles_with_retry(
+    client: MarketDataClient,
+    symbol: str,
+    *,
+    countback: int,
+    attempts: int = 2,
+) -> list:
+    total_attempts = max(1, attempts)
+    for attempt in range(total_attempts):
+        try:
+            return await client.candles(symbol, countback=countback)
+        except MarketDataError:
+            if attempt == total_attempts - 1:
+                return []
+            await asyncio.sleep(0.5 * (attempt + 1))
+    return []
+
+
+def _apply_stored_candle_fallback(
+    connection,
+    candle_map: dict[str, list],
+    symbols: list[str],
+    *,
+    countback: int,
+) -> list[str]:
+    missing_symbols = [symbol for symbol in symbols if symbol and symbol not in candle_map]
+    if not missing_symbols:
+        return []
+
+    stored_rows = fetch_recent_daily_bars(connection, missing_symbols, countback=countback)
+    stored_map = _stored_rows_to_candle_map(stored_rows)
+    reference_date = _latest_candle_date(candle_map)
+    unresolved_symbols = []
+    for symbol in missing_symbols:
+        candles = stored_map.get(symbol, [])
+        if len(candles) < countback:
+            unresolved_symbols.append(symbol)
+            continue
+        if reference_date is not None and _candle_date(candles[-1]) < reference_date:
+            unresolved_symbols.append(symbol)
+            continue
+        candle_map[symbol] = candles[-countback:]
+    return unresolved_symbols
+
+
+def _select_top_price_mover_symbols(
+    candle_map: dict[str, list],
+    symbols: list[str],
+    *,
+    limit: int,
+    movement_days: int,
+    min_price: float,
+    min_average_volume: int,
+) -> list[str]:
+    movers = []
+    for symbol in symbols:
+        candles = candle_map.get(symbol, [])
+        if not candles:
+            continue
+        if candles[-1].close <= min_price:
+            continue
+        if not _meets_average_volume(candles, min_average_volume):
+            continue
+        return_value = _calendar_day_return(candles, movement_days)
+        if return_value is None:
+            continue
+        movers.append((symbol, return_value))
+    movers.sort(key=lambda item: (-item[1], item[0]))
+    return [symbol for symbol, _return_value in movers[:limit]]
+
+
+def _calendar_day_return(candles: list[Candle], days: int) -> float | None:
+    if not candles or candles[-1].close <= 0:
+        return None
+    target_date = _candle_date(candles[-1]) - timedelta(days=max(1, days))
+    start = None
+    for candle in candles:
+        if _candle_date(candle) <= target_date:
+            start = candle
+        else:
+            break
+    if start is None or start.close <= 0:
+        return None
+    return candles[-1].close / start.close - 1
+
+
+def _meets_average_volume(candles: list[Candle], min_average_volume: int, days: int = 20) -> bool:
+    if min_average_volume <= 0:
+        return True
+    if len(candles) < days:
+        return False
+    average_volume = sum(candle.volume for candle in candles[-days:]) / days
+    return average_volume > min_average_volume
+
+
+def _stored_rows_to_candle_map(rows: list[dict[str, Any]]) -> dict[str, list[Candle]]:
+    candle_map: dict[str, list[Candle]] = {}
+    for row in rows:
+        candle = _stored_row_to_candle(row)
+        if candle is None:
+            continue
+        candle_map.setdefault(str(row["symbol"]).upper(), []).append(candle)
+    return candle_map
+
+
+def _stored_row_to_candle(row: dict[str, Any]) -> Candle | None:
+    bar_date = row.get("bar_date")
+    if not bar_date:
+        return None
+    if isinstance(bar_date, str):
+        date_value = datetime.fromisoformat(bar_date).date()
+    elif isinstance(bar_date, datetime):
+        date_value = bar_date.date()
+    else:
+        date_value = bar_date
+    timestamp = int(datetime.combine(date_value, time.min, tzinfo=UTC).timestamp())
+    try:
+        return Candle(
+            timestamp=timestamp,
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=int(row.get("volume") or 0),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_candle_date(candle_map: dict[str, list]):
+    dates = [_candle_date(candles[-1]) for candles in candle_map.values() if candles]
+    return max(dates) if dates else None
+
+
+def _candle_date(candle: Candle):
+    return datetime.fromtimestamp(candle.timestamp, UTC).date()
 
 
 async def _score_options(

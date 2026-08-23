@@ -46,7 +46,13 @@ def score_market_candidates(
             scores.append(score_symbol(symbol, candles, benchmark_candles))
         except ValueError:
             continue
-    scores.sort(key=lambda item: item.score, reverse=True)
+    scores.sort(
+        key=lambda item: (
+            item.score,
+            item.factors.return_1m if item.factors.return_1m is not None else -999,
+        ),
+        reverse=True,
+    )
     return scores[:top_n]
 
 

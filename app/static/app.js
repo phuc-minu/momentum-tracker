@@ -7,18 +7,14 @@ const state = {
 };
 
 const DISCOVERY_SORT_CONFIG = {
-  rank: { type: "number", direction: "asc", value: (item) => item.discovery_rank },
   symbol: { type: "text", direction: "asc", value: (item) => item.symbol },
   price: { type: "number", direction: "desc", value: (item) => item.last_close },
   rsi: { type: "number", direction: "desc", value: (item) => item.rsi_14 },
   score: { type: "number", direction: "desc", value: (item) => item.momentum_score },
-  sector: { type: "text", direction: "asc", value: (item) => item.market_group || item.sector },
   growth: { type: "number", direction: "desc", value: (item) => item.return_2w },
-  signal: { type: "text", direction: "asc", value: (item) => item.price_signal },
   volume: { type: "number", direction: "desc", value: (item) => item.volume_ratio_20d },
   calls: { type: "number", direction: "desc", value: (item) => item.call_volume },
   options: { type: "number", direction: "desc", value: (item) => item.options_confirmation_score },
-  source: { type: "text", direction: "asc", value: (item) => `${item.catalyst || ""} ${item.setup || ""}`.trim() },
 };
 
 const elements = {
@@ -342,7 +338,7 @@ function compareDiscoveryRows(left, right) {
     const scoreTieBreak = compareNullableValues(left.momentum_score, right.momentum_score, "desc", "number");
     if (scoreTieBreak !== 0) return scoreTieBreak;
   }
-  const growthTieBreak = compareNullableValues(left.return_2w, right.return_2w, "desc", "number");
+  const growthTieBreak = compareNullableValues(left.return_1m, right.return_1m, "desc", "number");
   if (growthTieBreak !== 0) return growthTieBreak;
   return left.symbol.localeCompare(right.symbol);
 }
@@ -362,7 +358,7 @@ function compareNullableValues(left, right, direction, type) {
 function compareDefaultDiscoveryRows(left, right) {
   const score = compareNullableValues(left.momentum_score, right.momentum_score, "desc", "number");
   if (score !== 0) return score;
-  const growth = compareNullableValues(left.return_2w, right.return_2w, "desc", "number");
+  const growth = compareNullableValues(left.return_1m, right.return_1m, "desc", "number");
   if (growth !== 0) return growth;
   return left.symbol.localeCompare(right.symbol);
 }
@@ -459,6 +455,7 @@ function phase2ToDiscoveryRow(item, periodDays) {
     price_signal: phase2PriceSignal(factors),
     volume_ratio_20d: factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d,
     rsi_14: factors.rsi_14,
+    return_1m: factors.return_1m,
     return_2w: growth,
     last_close: item.last_close,
     call_volume: item.call_volume,

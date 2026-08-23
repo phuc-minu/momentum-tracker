@@ -67,10 +67,7 @@ def score_symbol(symbol: str, candles: list[Candle], benchmark_candles: list[Can
 
 def _score(factors: MomentumFactors) -> float:
     raw = 50.0
-    raw += _clamp((factors.return_3m or 0) * 120, -18, 22)
-    raw += _clamp((factors.return_6m or 0) * 70, -16, 18)
-    raw += _clamp((factors.return_12m or 0) * 35, -12, 14)
-    raw += _clamp((factors.relative_strength_3m or 0) * 100, -15, 18)
+    raw += _clamp((factors.return_1m or 0) * 120, -18, 22)
 
     if factors.distance_to_50d_sma is not None:
         raw += _clamp(factors.distance_to_50d_sma * 70, -10, 10)
@@ -130,7 +127,7 @@ def _classify_setup(factors: MomentumFactors) -> str:
         and above_200
     )
 
-    if factors.return_3m is not None and factors.return_3m < -0.08:
+    if factors.return_1m is not None and factors.return_1m < -0.08:
         return "weak"
     if near_high and above_50:
         return "breakout"

@@ -27,6 +27,7 @@ CATALYST_TERMS = {
 }
 MIN_AVERAGE_DAILY_VOLUME = 3_000_000
 MIN_STOCK_PRICE = 10.0
+ONE_MONTH_TRADING_DAYS = 21
 
 
 async def discover_movers(
@@ -133,13 +134,7 @@ async def _discover_live_candidates(
 
 
 def _sort_discovery_candidates(candidates: list[DiscoveryCandidate]) -> None:
-    candidates.sort(
-        key=lambda item: (
-            item.momentum_score,
-            item.options_confirmation_score if item.options_confirmation_score is not None else -1,
-        ),
-        reverse=True,
-    )
+    candidates.sort(key=lambda item: (-item.momentum_score, -item.return_1m, item.symbol))
 
 
 async def _build_bulk_price_candidates(
@@ -153,22 +148,28 @@ async def _build_bulk_price_candidates(
         return []
 
     latest_timestamp = max(candle.timestamp for candle in latest.values())
-    start = {}
-    start_date = _previous_trading_date(latest_timestamp, period_days)
-    for offset in range(5):
-        candidate_date = _previous_calendar_date(start_date, offset)
-        start = await client.bulk_candles(symbols, date=candidate_date)
-        if start:
-            break
+    start = await _bulk_candles_near_period(client, symbols, latest_timestamp, period_days)
+    one_month_start = (
+        start
+        if period_days == ONE_MONTH_TRADING_DAYS
+        else await _bulk_candles_near_period(client, symbols, latest_timestamp, ONE_MONTH_TRADING_DAYS)
+    )
 
-    if not start:
+    if not start or not one_month_start:
         return []
 
     candidates: list[DiscoveryCandidate] = []
     for symbol, sector in universe.items():
         start_candle = start.get(symbol)
+        one_month_start_candle = one_month_start.get(symbol)
         last_candle = latest.get(symbol)
-        candidate = _build_candidate_from_candle_pair(symbol, sector, start_candle, last_candle)
+        candidate = _build_candidate_from_candle_pair(
+            symbol,
+            sector,
+            start_candle,
+            one_month_start_candle,
+            last_candle,
+        )
         if candidate:
             candidates.append(candidate)
     return candidates
@@ -178,15 +179,17 @@ def _build_candidate_from_candle_pair(
     symbol: str,
     sector: str,
     start: Candle | None,
+    one_month_start: Candle | None,
     last: Candle | None,
 ) -> DiscoveryCandidate | None:
-    if start is None or last is None or start.close <= 0:
+    if start is None or one_month_start is None or last is None or start.close <= 0 or one_month_start.close <= 0:
         return None
 
     return_2w = last.close / start.close - 1
+    return_1m = last.close / one_month_start.close - 1
     price_signal = "new 20-day high" if last.close >= start.close else "momentum continuation"
     setup = _setup_label(return_2w, price_signal, None)
-    momentum_score = _momentum_score(return_2w, price_signal, None, None, None)
+    momentum_score = _momentum_score(return_1m, price_signal, None, None, None)
 
     return DiscoveryCandidate(
         symbol=symbol,
@@ -196,6 +199,7 @@ def _build_candidate_from_candle_pair(
         price_signal=price_signal,
         relative_strength_percentile=0,
         volume_ratio_20d=None,
+        return_1m=round(return_1m, 4),
         return_2w=round(return_2w, 4),
         start_close=round(start.close, 2),
         last_close=round(last.close, 2),
@@ -215,6 +219,21 @@ def _build_candidate_from_candle_pair(
         catalyst="price momentum; catalyst not identified",
         headlines=[],
     )
+
+
+async def _bulk_candles_near_period(
+    client: MarketDataClient,
+    symbols: list[str],
+    latest_timestamp: int,
+    period_days: int,
+) -> dict[str, Candle]:
+    start_date = _previous_trading_date(latest_timestamp, period_days)
+    for offset in range(5):
+        candidate_date = _previous_calendar_date(start_date, offset)
+        rows = await client.bulk_candles(symbols, date=candidate_date)
+        if rows:
+            return rows
+    return {}
 
 
 def _previous_trading_date(timestamp: int, trading_days: int) -> str:
@@ -344,12 +363,13 @@ async def _build_candidate(
     period_days: int = 10,
     demo: bool = False,
 ) -> DiscoveryCandidate | None:
-    if len(candles) <= period_days:
+    if len(candles) <= max(period_days, ONE_MONTH_TRADING_DAYS):
         return None
 
     start = candles[-period_days - 1]
+    one_month_start = candles[-ONE_MONTH_TRADING_DAYS - 1]
     last = candles[-1]
-    if start.close <= 0:
+    if start.close <= 0 or one_month_start.close <= 0:
         return None
     try:
         min_price = float(os.getenv("DISCOVERY_MIN_PRICE", os.getenv("PHASE2_MIN_PRICE", str(MIN_STOCK_PRICE))))
@@ -361,11 +381,12 @@ async def _build_candidate(
         return None
 
     return_2w = last.close / start.close - 1
+    return_1m = last.close / one_month_start.close - 1
     volume_ratio = _volume_ratio(candles)
     rsi_14 = _rsi([candle.close for candle in candles], 14)
     price_signal = _price_signal(candles)
     setup = _setup_label(return_2w, price_signal, volume_ratio)
-    momentum_score = _momentum_score(return_2w, price_signal, volume_ratio, options_activity, rsi_14)
+    momentum_score = _momentum_score(return_1m, price_signal, volume_ratio, options_activity, rsi_14)
     headlines = news if news is not None else _demo_news(symbol)
     earnings_near_move = _earnings_near_move(earnings or [], start.timestamp, last.timestamp)
     headline_related = _headlines_look_earnings_related(headlines)
@@ -380,6 +401,7 @@ async def _build_candidate(
         price_signal=price_signal,
         relative_strength_percentile=0,
         volume_ratio_20d=volume_ratio,
+        return_1m=round(return_1m, 4),
         return_2w=round(return_2w, 4),
         start_close=round(start.close, 2),
         last_close=round(last.close, 2),
@@ -425,7 +447,7 @@ async def _safe_option_chain(client: MarketDataClient, symbol: str) -> list[dict
 def _apply_relative_strength_percentiles(candidates: list[DiscoveryCandidate]) -> list[DiscoveryCandidate]:
     if not candidates:
         return candidates
-    ordered = sorted(candidates, key=lambda item: item.return_2w)
+    ordered = sorted(candidates, key=lambda item: item.return_1m)
     denominator = max(len(ordered) - 1, 1)
     percentiles = {
         item.symbol: round((index / denominator) * 100, 1)
@@ -509,13 +531,13 @@ def _setup_label(return_2w: float, price_signal: str, volume_ratio: float | None
 
 
 def _momentum_score(
-    return_2w: float,
+    return_1m: float,
     price_signal: str,
     volume_ratio: float | None,
     options_activity: dict | None,
     rsi_14: float | None,
 ) -> float:
-    score = 55 + min(return_2w * 120, 28)
+    score = 55 + min(return_1m * 120, 28)
     if "50-day high" in price_signal:
         score += 8
     elif "20-day high" in price_signal:

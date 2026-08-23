@@ -1,16 +1,24 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
 from discover import _build_candidate, _live_discovery_universe, _sort_discovery_candidates
 from main import app
 from marketdata import MarketDataCache, MarketDataClient, MarketDataError, demo_candles
-from momentum import adjusted_momentum_score, score_symbol
+from momentum import _score, adjusted_momentum_score, score_symbol
 from options_activity import analyze_options_activity
-from phase2_refresh import _filter_symbols_by_average_volume, _option_activity_to_db
-from phase2_db import fetch_phase2_candidates, prune_scores_for_run
+from phase2_refresh import (
+    _apply_stored_candle_fallback,
+    _calendar_day_return,
+    _filter_symbols_by_average_volume,
+    _filter_symbols_by_price_movement,
+    _option_activity_to_db,
+    _select_top_price_mover_symbols,
+)
+from phase2_db import fetch_phase2_candidates, fetch_recent_daily_bars, prune_scores_for_run
 from phase2_pipeline import score_market_candidates
-from schemas import Candle, DiscoveryCandidate
+from schemas import Candle, DiscoveryCandidate, MomentumFactors
 from symbol_source import configured_phase2_symbols, load_phase2_symbols
 
 TEST_PASSWORD = "test-password"
@@ -51,6 +59,35 @@ def test_adjusted_momentum_score_rewards_current_volume_above_average():
     assert adjusted_momentum_score(base, current_volume_ratio_20d=0.5) == 76
 
 
+def test_momentum_score_uses_only_one_month_return_horizon():
+    factors = MomentumFactors(
+        return_1m=0.10,
+        return_3m=0,
+        return_6m=0,
+        return_12m=0,
+        benchmark_return_3m=0,
+        relative_strength_3m=0,
+        distance_to_20d_high=None,
+        distance_to_50d_sma=None,
+        distance_to_200d_sma=None,
+        volume_ratio_20d_vs_60d=None,
+        current_volume_ratio_20d=None,
+        rsi_14=None,
+    )
+    longer_horizon_move = factors.model_copy(
+        update={
+            "return_3m": 2.0,
+            "return_6m": -0.9,
+            "return_12m": 4.0,
+            "relative_strength_3m": 1.5,
+        }
+    )
+
+    assert _score(factors) == 62
+    assert _score(longer_horizon_move) == 62
+    assert _score(factors.model_copy(update={"return_1m": 0.20})) == 72
+
+
 def test_score_symbol_compares_current_volume_to_prior_20_days():
     benchmark = demo_candles("BENCH", 260)
     candles = _with_volume(demo_candles("VOLUME", 260), 4_000_000)
@@ -87,8 +124,10 @@ def test_dashboard_served_at_root():
     assert "Stock Momentum AI" in response.text
     assert "PostgreSQL Momentum Candidates" in response.text
     assert "Demo" not in response.text
-    for sort_key in ("rank", "symbol", "price", "rsi", "score", "sector", "growth", "signal", "volume", "calls", "options", "source"):
+    for sort_key in ("symbol", "price", "rsi", "score", "growth", "volume", "calls", "options"):
         assert f'data-sort-key="{sort_key}"' in response.text
+    for sort_key in ("rank", "sector", "signal", "source"):
+        assert f'data-sort-key="{sort_key}"' not in response.text
 
 
 def test_demo_discover_endpoint_returns_movers(monkeypatch):
@@ -179,17 +218,17 @@ def test_live_discovery_universe_can_use_static_fallback(monkeypatch):
     assert len(universe) > 50
 
 
-def test_discovery_sort_uses_score_then_options_confirmation():
+def test_discovery_sort_uses_score_then_one_month_return():
     candidates = [
-        _candidate("AAA", momentum_score=90, options_confirmation_score=40),
-        _candidate("BBB", momentum_score=91, options_confirmation_score=None),
-        _candidate("CCC", momentum_score=90, options_confirmation_score=88),
-        _candidate("DDD", momentum_score=90, options_confirmation_score=None),
+        _candidate("AAA", momentum_score=90, return_1m=0.15, options_confirmation_score=40),
+        _candidate("BBB", momentum_score=91, return_1m=0.01, options_confirmation_score=None),
+        _candidate("CCC", momentum_score=90, return_1m=0.05, options_confirmation_score=88),
+        _candidate("DDD", momentum_score=90, return_1m=0.10, options_confirmation_score=None),
     ]
 
     _sort_discovery_candidates(candidates)
 
-    assert [candidate.symbol for candidate in candidates] == ["BBB", "CCC", "AAA", "DDD"]
+    assert [candidate.symbol for candidate in candidates] == ["BBB", "AAA", "DDD", "CCC"]
 
 
 def test_scan_requires_login(monkeypatch):
@@ -339,6 +378,141 @@ def test_phase2_prefilter_uses_average_daily_volume(monkeypatch):
     assert [item["symbol"] for item in symbols] == ["HIGH"]
 
 
+def test_phase2_prefilter_keeps_top_price_movers(monkeypatch):
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.api_key = "test-token"
+
+        async def candles(self, symbol, countback=40):
+            multipliers = {"MRNA": 1.6, "NVDA": 1.3, "AAPL": 1.1, "LOWV": 2.0}
+            candles = _with_calendar_day_move(demo_candles(symbol, countback), 30, multipliers[symbol])
+            volume = 1_000_000 if symbol == "LOWV" else 4_000_000
+            return _with_volume(candles, volume)
+
+    monkeypatch.setattr("phase2_refresh.MarketDataClient", FakeClient)
+
+    symbols = asyncio.run(
+        _filter_symbols_by_price_movement(
+            [{"symbol": "AAPL"}, {"symbol": "MRNA"}, {"symbol": "NVDA"}, {"symbol": "LOWV"}],
+            min_average_volume=3_000_000,
+            min_price=10,
+            volume_days=20,
+            movement_days=30,
+            limit=2,
+            concurrency=2,
+        )
+    )
+
+    assert [item["symbol"] for item in symbols] == ["MRNA", "NVDA"]
+
+
+def test_phase2_fetch_recent_daily_bars_reads_latest_rows():
+    class FakeCursor:
+        query = ""
+        params = None
+
+        def execute(self, query, params=None):
+            self.query = query
+            self.params = params
+            return self
+
+        def fetchall(self):
+            return [
+                {
+                    "symbol": "MRNA",
+                    "bar_date": "2026-08-21",
+                    "open": 140,
+                    "high": 150,
+                    "low": 130,
+                    "close": 145.13,
+                    "volume": 86_865_450,
+                }
+            ]
+
+    class FakeConnection:
+        cursor_instance = FakeCursor()
+
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self.cursor_instance
+
+        def __exit__(self, *args):
+            return False
+
+    connection = FakeConnection()
+
+    rows = fetch_recent_daily_bars(connection, ["MRNA"], countback=260)
+
+    assert rows[0]["symbol"] == "MRNA"
+    assert "row_number() over (partition by symbol order by bar_date desc)" in connection.cursor_instance.query
+    assert connection.cursor_instance.params == (["MRNA"], 260)
+
+
+def test_phase2_refresh_uses_stored_bars_for_provider_misses(monkeypatch):
+    reference = demo_candles("AAPL", 80)
+    fallback = demo_candles("MRNA", 80)
+    fallback[-1] = fallback[-1].model_copy(update={"timestamp": reference[-1].timestamp})
+
+    def fake_fetch_recent_daily_bars(connection, symbols, *, countback):
+        assert symbols == ["MRNA"]
+        assert countback == 80
+        return _daily_bar_rows("MRNA", fallback)
+
+    monkeypatch.setattr("phase2_refresh.fetch_recent_daily_bars", fake_fetch_recent_daily_bars)
+    candle_map = {"AAPL": reference}
+
+    unresolved = _apply_stored_candle_fallback(None, candle_map, ["AAPL", "MRNA"], countback=80)
+
+    assert unresolved == []
+    assert candle_map["MRNA"][-1].close == fallback[-1].close
+    assert len(candle_map["MRNA"]) == 80
+
+
+def test_phase2_refresh_rejects_stale_stored_bars(monkeypatch):
+    reference = demo_candles("AAPL", 80)
+    fallback = demo_candles("MRNA", 80)
+    fallback[-1] = fallback[-1].model_copy(update={"timestamp": reference[-1].timestamp - 86_400})
+
+    monkeypatch.setattr(
+        "phase2_refresh.fetch_recent_daily_bars",
+        lambda connection, symbols, *, countback: _daily_bar_rows("MRNA", fallback),
+    )
+    candle_map = {"AAPL": reference}
+
+    unresolved = _apply_stored_candle_fallback(None, candle_map, ["AAPL", "MRNA"], countback=80)
+
+    assert unresolved == ["MRNA"]
+    assert "MRNA" not in candle_map
+
+
+def test_phase2_selects_top_30_day_price_movers_before_scoring():
+    candle_map = {
+        "MRNA": _with_calendar_day_move(demo_candles("MRNA", 80), 30, 1.6),
+        "AAPL": _with_calendar_day_move(demo_candles("AAPL", 80), 30, 1.1),
+        "NVDA": _with_calendar_day_move(demo_candles("NVDA", 80), 30, 1.3),
+        "LOWV": _with_volume(_with_calendar_day_move(demo_candles("LOWV", 80), 30, 2.0), 1_000_000),
+    }
+
+    symbols = _select_top_price_mover_symbols(
+        candle_map,
+        ["AAPL", "MRNA", "NVDA", "LOWV"],
+        limit=2,
+        movement_days=30,
+        min_price=10,
+        min_average_volume=3_000_000,
+    )
+
+    assert symbols == ["MRNA", "NVDA"]
+
+
+def test_phase2_calendar_day_return_uses_bar_at_or_before_target_date():
+    candles = _with_calendar_day_move(demo_candles("CAL", 80), 30, 1.25)
+
+    assert round(_calendar_day_return(candles, 30), 4) == 0.25
+
+
 def test_phase2_scores_market_candidates():
     benchmark = demo_candles("BENCH", 260)
     candle_map = {
@@ -485,7 +659,13 @@ def test_phase2_option_activity_serializes_for_db():
     assert "AMD260828C00200000" in row["preferred_contract"]
 
 
-def _candidate(symbol: str, *, momentum_score: float, options_confirmation_score: float | None) -> DiscoveryCandidate:
+def _candidate(
+    symbol: str,
+    *,
+    momentum_score: float,
+    options_confirmation_score: float | None,
+    return_1m: float = 0.1,
+) -> DiscoveryCandidate:
     return DiscoveryCandidate(
         symbol=symbol,
         sector="Technology",
@@ -493,6 +673,7 @@ def _candidate(symbol: str, *, momentum_score: float, options_confirmation_score
         setup="Momentum watch",
         price_signal="momentum continuation",
         relative_strength_percentile=50,
+        return_1m=return_1m,
         return_2w=0.1,
         start_close=100,
         last_close=110,
@@ -523,6 +704,44 @@ def _with_last_price(candles: list[Candle], price: float) -> list[Candle]:
     updated = list(candles)
     updated[-1] = updated[-1].model_copy(update={"open": price, "high": price, "low": price, "close": price})
     return updated
+
+
+def _with_calendar_day_move(candles: list[Candle], days: int, multiplier: float) -> list[Candle]:
+    updated = list(candles)
+    last_date = datetime.fromtimestamp(updated[-1].timestamp, UTC).date()
+    target_date = last_date - timedelta(days=days)
+    start_index = 0
+    for index, candle in enumerate(updated):
+        if datetime.fromtimestamp(candle.timestamp, UTC).date() <= target_date:
+            start_index = index
+        else:
+            break
+    start_close = updated[start_index].close
+    last_close = round(start_close * multiplier, 2)
+    updated[-1] = updated[-1].model_copy(
+        update={
+            "open": last_close,
+            "high": last_close,
+            "low": last_close,
+            "close": last_close,
+        }
+    )
+    return updated
+
+
+def _daily_bar_rows(symbol: str, candles: list[Candle]) -> list[dict]:
+    return [
+        {
+            "symbol": symbol,
+            "bar_date": datetime.fromtimestamp(candle.timestamp, UTC).date(),
+            "open": candle.open,
+            "high": candle.high,
+            "low": candle.low,
+            "close": candle.close,
+            "volume": candle.volume,
+        }
+        for candle in candles
+    ]
 
 
 def test_marketdata_cache_round_trips_payload(tmp_path):

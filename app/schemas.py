@@ -76,6 +76,7 @@ class DiscoveryCandidate(BaseModel):
     price_signal: str
     relative_strength_percentile: float
     volume_ratio_20d: float | None = None
+    return_1m: float
     return_2w: float
     start_close: float
     last_close: float

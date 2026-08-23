@@ -187,6 +187,34 @@ def upsert_daily_bars(connection, rows: list[dict[str, Any]]) -> None:
     connection.commit()
 
 
+def fetch_recent_daily_bars(connection, symbols: list[str], *, countback: int) -> list[dict[str, Any]]:
+    if not symbols:
+        return []
+    with connection.cursor() as cursor:
+        rows = cursor.execute(
+            """
+            select symbol, bar_date, open, high, low, close, volume
+            from (
+              select
+                symbol,
+                bar_date,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                row_number() over (partition by symbol order by bar_date desc) as row_number
+              from daily_bars
+              where symbol = any(%s)
+            ) ranked
+            where row_number <= %s
+            order by symbol, bar_date
+            """,
+            (symbols, countback),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def upsert_momentum_scores(connection, run_id: int, scores: list[dict[str, Any]]) -> None:
     if not scores:
         return
