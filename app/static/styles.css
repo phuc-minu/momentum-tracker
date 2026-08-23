@@ -224,6 +224,10 @@ h2 {
   justify-content: start;
 }
 
+.field-wide {
+  min-width: 0;
+}
+
 .section-heading {
   display: flex;
   align-items: end;
@@ -422,6 +426,50 @@ h2 {
   overflow-x: auto;
 }
 
+.severity-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.severity-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.severity-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(17, 24, 39, 0.18);
+  border-radius: 50%;
+}
+
+.severity-dot.overextended-low {
+  background: #fff6cc;
+}
+
+.severity-dot.overextended-medium {
+  background: #ffdca8;
+}
+
+.severity-dot.overextended-high {
+  background: #ff9a8a;
+}
+
+.severity-dot.overextended-extreme {
+  background: #ff4d4f;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -435,7 +483,23 @@ table {
   font-size: 12px;
 }
 
+.overextended-table {
+  min-width: 1180px;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.biotech-table {
+  min-width: 1180px;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
 .discover-table .col-rank {
+  width: 54px;
+}
+
+.overextended-table .col-rank {
   width: 54px;
 }
 
@@ -443,6 +507,35 @@ table {
 .discover-table .col-price,
 .discover-table .col-score {
   width: 76px;
+}
+
+.overextended-table .col-symbol,
+.overextended-table .col-price,
+.overextended-table .col-score {
+  width: 84px;
+}
+
+.biotech-table .col-symbol,
+.biotech-table .col-days,
+.biotech-table .col-impact {
+  width: 90px;
+}
+
+.biotech-table .col-date,
+.biotech-table .col-stage {
+  width: 130px;
+}
+
+.biotech-table .col-company {
+  width: 180px;
+}
+
+.biotech-table .col-event {
+  width: 160px;
+}
+
+.biotech-table .col-notes {
+  width: 390px;
 }
 
 .discover-table .col-sector {
@@ -471,6 +564,21 @@ table {
   width: 260px;
 }
 
+.overextended-table .col-growth,
+.overextended-table .col-rsi,
+.overextended-table .col-volume,
+.overextended-table .col-distance {
+  width: 100px;
+}
+
+.overextended-table .col-setup {
+  width: 120px;
+}
+
+.overextended-table .col-reason {
+  width: 300px;
+}
+
 th,
 td {
   height: 54px;
@@ -481,7 +589,11 @@ td {
 }
 
 .discover-table th,
-.discover-table td {
+.discover-table td,
+.overextended-table th,
+.overextended-table td,
+.biotech-table th,
+.biotech-table td {
   height: auto;
   min-height: 48px;
   overflow: hidden;
@@ -491,7 +603,9 @@ td {
   overflow-wrap: anywhere;
 }
 
-.discover-table th {
+.discover-table th,
+.overextended-table th,
+.biotech-table th {
   line-height: 1.2;
 }
 
@@ -522,7 +636,9 @@ td {
   text-align: center;
 }
 
-.discover-table td {
+.discover-table td,
+.overextended-table td,
+.biotech-table td {
   line-height: 1.35;
 }
 
@@ -549,6 +665,104 @@ tbody tr {
 tbody tr:hover,
 tbody tr.selected {
   background: #eef8f9;
+}
+
+.overextended-table tbody tr.overextended-low {
+  background: #fff6cc;
+}
+
+.overextended-table tbody tr.overextended-medium {
+  background: #ffdca8;
+}
+
+.overextended-table tbody tr.overextended-high {
+  background: #ff9a8a;
+}
+
+.overextended-table tbody tr.overextended-extreme {
+  background: #ff4d4f;
+  color: #3b0606;
+}
+
+.overextended-table tbody tr.overextended-low:hover {
+  background: #ffef99;
+}
+
+.overextended-table tbody tr.overextended-medium:hover {
+  background: #ffc878;
+}
+
+.overextended-table tbody tr.overextended-high:hover {
+  background: #ff7b68;
+}
+
+.overextended-table tbody tr.overextended-extreme:hover {
+  background: #f9363f;
+}
+
+.overextended-table tbody tr.overextended-extreme .symbol-link,
+.overextended-table tbody tr.overextended-extreme .reason-cell,
+.overextended-table tbody tr.overextended-extreme .setup-pill,
+.overextended-table tbody tr.overextended-extreme .negative,
+.overextended-table tbody tr.overextended-extreme .positive {
+  color: #3b0606;
+}
+
+.overextended-table tbody tr.overextended-extreme .setup-pill {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.biotech-table tbody tr.catalyst-overdue {
+  background: #fff1f0;
+}
+
+.biotech-table tbody tr.catalyst-imminent {
+  background: #fff6cc;
+}
+
+.biotech-table tbody tr.catalyst-soon {
+  background: #eefbf4;
+}
+
+.biotech-table tbody tr.catalyst-upcoming {
+  background: #fbfcfe;
+}
+
+.biotech-table tbody tr:hover {
+  background: #eef8f9;
+}
+
+.catalyst-days {
+  font-weight: 900;
+}
+
+.impact-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  height: 26px;
+  border-radius: 999px;
+  font-weight: 900;
+}
+
+.impact-high {
+  background: #ffe4e0;
+  color: var(--loss);
+}
+
+.impact-medium {
+  background: #fff1c2;
+  color: #8a5200;
+}
+
+.impact-low {
+  background: #e9f6f7;
+  color: var(--accent-strong);
+}
+
+.notes-cell {
+  color: #344054;
 }
 
 .score-cell {
@@ -632,6 +846,11 @@ tbody tr.selected {
   max-width: none;
   color: #344054;
   text-overflow: initial;
+}
+
+.reason-cell {
+  color: #344054;
+  font-weight: 700;
 }
 
 .subtle {

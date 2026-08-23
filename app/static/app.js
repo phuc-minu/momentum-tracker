@@ -3,8 +3,51 @@ const state = {
   selectedSymbol: null,
   liveDataAvailable: false,
   discoveryRows: [],
+  overextendedRows: [],
+  biotechEvents: [],
   discoverySort: { key: "score", direction: "desc" },
 };
+
+const BIOTECH_STORAGE_KEY = "momentum:biotech-catalysts:v1";
+const BIOTECH_CATALYST_WINDOW_DAYS = 30;
+const DEFAULT_BIOTECH_EVENTS = [
+  {
+    id: "sample-mrna-cancer-vaccine",
+    symbol: "MRNA",
+    company: "Moderna",
+    event_type: "Data presentation",
+    catalyst_date: "2026-09-15",
+    stage: "Phase 3",
+    impact: "High",
+    source: "",
+    notes: "Cancer vaccine data window",
+    sample: true,
+  },
+  {
+    id: "sample-vktx-obesity-data",
+    symbol: "VKTX",
+    company: "Viking Therapeutics",
+    event_type: "Trial readout",
+    catalyst_date: "2026-10-01",
+    stage: "Phase 2",
+    impact: "High",
+    source: "",
+    notes: "Metabolic program update",
+    sample: true,
+  },
+  {
+    id: "sample-crsp-regulatory",
+    symbol: "CRSP",
+    company: "CRISPR Therapeutics",
+    event_type: "Conference",
+    catalyst_date: "2026-11-05",
+    stage: "Commercial",
+    impact: "Medium",
+    source: "",
+    notes: "Pipeline and launch update",
+    sample: true,
+  },
+];
 
 const DISCOVERY_SORT_CONFIG = {
   symbol: { type: "text", direction: "asc", value: (item) => item.symbol },
@@ -50,6 +93,10 @@ const elements = {
   discoverButton: document.querySelector("#discoverButton"),
   discoverMeta: document.querySelector("#discoverMeta"),
   discoverBody: document.querySelector("#discoverBody"),
+  overextendedMeta: document.querySelector("#overextendedMeta"),
+  overextendedBody: document.querySelector("#overextendedBody"),
+  biotechMeta: document.querySelector("#biotechMeta"),
+  biotechBody: document.querySelector("#biotechBody"),
   growthColumnLabel: document.querySelector("#growthColumnLabel"),
   discoverySortButtons: document.querySelectorAll(".sort-button[data-sort-key]"),
   tabButtons: document.querySelectorAll(".tab-button"),
@@ -256,6 +303,38 @@ async function runDiscover() {
   }
 }
 
+async function runOverextended() {
+  elements.overextendedMeta.textContent = "Loading pullback watch";
+  try {
+    const response = await fetch("/phase2/candidates?limit=200", { credentials: "same-origin" });
+    const payload = await readJsonResponse(response);
+    requireAuthenticated(response, payload);
+    if (!response.ok) throw new Error(payload.detail || "Overextended candidates unavailable");
+
+    const rows = payload.results
+      .map(overextendedRow)
+      .filter((item) => item.pullback_risk >= 45)
+      .sort((left, right) => (
+        right.pullback_risk - left.pullback_risk
+        || (right.return_1m || 0) - (left.return_1m || 0)
+        || left.symbol.localeCompare(right.symbol)
+      ));
+
+    state.overextendedRows = rows.map((item, index) => ({
+      ...item,
+      pullback_rank: index + 1,
+    }));
+    const refreshed = payload.results[0]?.scored_at ? ` refreshed ${formatDateTime(payload.results[0].scored_at)}` : "";
+    elements.overextendedMeta.textContent = `${state.overextendedRows.length} pullback watches${refreshed}`;
+    renderOverextendedRows();
+  } catch (error) {
+    if (error instanceof AuthRequiredError) return;
+    state.overextendedRows = [];
+    elements.overextendedMeta.textContent = error.message;
+    elements.overextendedBody.innerHTML = `<tr><td class="empty-state" colspan="11">${error.message}</td></tr>`;
+  }
+}
+
 function setButtonLoading(button, isLoading, label = "Loading") {
   if (!DEFAULT_BUTTON_LABELS.has(button)) {
     DEFAULT_BUTTON_LABELS.set(button, button.innerHTML);
@@ -455,6 +534,7 @@ function phase2ToDiscoveryRow(item, periodDays) {
     price_signal: phase2PriceSignal(factors),
     volume_ratio_20d: factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d,
     rsi_14: factors.rsi_14,
+    factors,
     return_1m: factors.return_1m,
     return_2w: growth,
     last_close: item.last_close,
@@ -466,6 +546,194 @@ function phase2ToDiscoveryRow(item, periodDays) {
     options_signal: item.options_signal || "Options unavailable",
     catalyst: "PostgreSQL refresh",
   };
+}
+
+function overextendedRow(item) {
+  const factors = item.factors || {};
+  const risk = pullbackRiskScore(item, factors);
+  return {
+    symbol: item.symbol,
+    last_close: item.last_close,
+    setup: item.setup,
+    return_1m: factors.return_1m,
+    rsi_14: factors.rsi_14,
+    distance_to_50d_sma: factors.distance_to_50d_sma,
+    distance_to_20d_high: factors.distance_to_20d_high,
+    current_volume_ratio_20d: factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d,
+    pullback_risk: risk,
+    reasons: pullbackReasons(item, factors),
+  };
+}
+
+function pullbackRiskScore(item, factors) {
+  let score = 0;
+  if (item.setup === "extended") score += 30;
+  if (factors.rsi_14 >= 80) score += 25;
+  else if (factors.rsi_14 >= 70) score += 16;
+  if (factors.distance_to_50d_sma !== null && factors.distance_to_50d_sma !== undefined) {
+    score += clamp((factors.distance_to_50d_sma - 0.12) * 80, 0, 30);
+  }
+  if (factors.distance_to_200d_sma !== null && factors.distance_to_200d_sma !== undefined) {
+    score += clamp((factors.distance_to_200d_sma - 0.30) * 25, 0, 15);
+  }
+  if (factors.return_1m !== null && factors.return_1m !== undefined) {
+    score += clamp((factors.return_1m - 0.20) * 35, 0, 18);
+  }
+  const volumeRatio = factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d;
+  if (volumeRatio >= 2) score += 8;
+  else if (volumeRatio >= 1.5) score += 4;
+  if (factors.distance_to_20d_high !== null && factors.distance_to_20d_high !== undefined && factors.distance_to_20d_high <= -0.08) {
+    score += 8;
+  }
+  return Math.min(100, Math.round(score));
+}
+
+function pullbackReasons(item, factors) {
+  const reasons = [];
+  if (item.setup === "extended") reasons.push("extended setup");
+  if (factors.rsi_14 >= 80) reasons.push("RSI above 80");
+  else if (factors.rsi_14 >= 70) reasons.push("RSI above 70");
+  if (factors.distance_to_50d_sma >= 0.20) reasons.push("far above 50D");
+  else if (factors.distance_to_50d_sma >= 0.12) reasons.push("stretched above 50D");
+  if (factors.return_1m >= 0.30) reasons.push("large 1M move");
+  const volumeRatio = factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d;
+  if (volumeRatio >= 2) reasons.push("volume spike");
+  if (factors.distance_to_20d_high <= -0.08) reasons.push("off recent high");
+  return reasons.length ? reasons.join(", ") : "watch for mean reversion";
+}
+
+function renderOverextendedRows() {
+  if (!state.overextendedRows.length) {
+    elements.overextendedBody.innerHTML = `<tr><td class="empty-state" colspan="11">No overextended candidates matched the pullback criteria</td></tr>`;
+    return;
+  }
+
+  elements.overextendedBody.innerHTML = state.overextendedRows
+    .map((item) => `
+      <tr class="${overextendedSeverityClass(item.pullback_risk)}">
+        <td>${item.pullback_rank}</td>
+        <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
+        <td>${formatPrice(item.last_close)}</td>
+        <td><strong class="${item.pullback_risk >= 80 ? "negative" : ""}">${item.pullback_risk}</strong></td>
+        <td>${formatPercent(item.return_1m)}</td>
+        <td>${formatRsi(item.rsi_14)}</td>
+        <td>${formatPercent(item.distance_to_50d_sma)}</td>
+        <td>${formatPercent(item.distance_to_20d_high)}</td>
+        <td>${formatRatio(item.current_volume_ratio_20d)}</td>
+        <td><span class="setup-pill">${item.setup}</span></td>
+        <td class="reason-cell">${item.reasons}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function overextendedSeverityClass(risk) {
+  if (risk >= 90) return "overextended-extreme";
+  if (risk >= 80) return "overextended-high";
+  if (risk >= 65) return "overextended-medium";
+  return "overextended-low";
+}
+
+function loadBiotechCatalysts() {
+  try {
+    const raw = localStorage.getItem(BIOTECH_STORAGE_KEY);
+    const rows = raw ? JSON.parse(raw) : [];
+    state.biotechEvents = Array.isArray(rows) && rows.length ? rows.filter(isBiotechEvent) : DEFAULT_BIOTECH_EVENTS;
+  } catch {
+    state.biotechEvents = DEFAULT_BIOTECH_EVENTS;
+  }
+  renderBiotechEvents();
+}
+
+function renderBiotechEvents() {
+  const trackedRows = [...state.biotechEvents].sort(compareBiotechEvents);
+  const rows = trackedRows.filter((item) => {
+    const days = daysUntil(item.catalyst_date);
+    return days >= 0 && days <= BIOTECH_CATALYST_WINDOW_DAYS;
+  });
+  elements.biotechMeta.textContent = `${rows.length} catalysts in next ${BIOTECH_CATALYST_WINDOW_DAYS} days, ${trackedRows.length} tracked`;
+
+  if (!rows.length) {
+    elements.biotechBody.innerHTML = `<tr><td class="empty-state" colspan="8">No biotech catalysts in the next ${BIOTECH_CATALYST_WINDOW_DAYS} days</td></tr>`;
+    return;
+  }
+
+  elements.biotechBody.innerHTML = rows.map((item) => {
+    const days = daysUntil(item.catalyst_date);
+    return `
+      <tr class="${catalystTimingClass(days)}">
+        <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.symbol)}</a></td>
+        <td>${escapeHtml(item.company || "--")}</td>
+        <td>${escapeHtml(item.event_type)}</td>
+        <td>${formatCatalystDate(item.catalyst_date)}</td>
+        <td><span class="catalyst-days">${formatDaysUntil(days)}</span></td>
+        <td>${escapeHtml(item.stage)}</td>
+        <td><span class="impact-pill ${impactClass(item.impact)}">${escapeHtml(item.impact)}</span></td>
+        <td class="notes-cell">${formatBiotechNotes(item)}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function compareBiotechEvents(left, right) {
+  const daySort = daysUntil(left.catalyst_date) - daysUntil(right.catalyst_date);
+  if (daySort !== 0) return daySort;
+  const impactSort = impactWeight(right.impact) - impactWeight(left.impact);
+  if (impactSort !== 0) return impactSort;
+  return left.symbol.localeCompare(right.symbol);
+}
+
+function isBiotechEvent(item) {
+  return Boolean(item && item.id && item.symbol && item.event_type && item.catalyst_date);
+}
+
+function daysUntil(dateValue) {
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return 9999;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((date.getTime() - today.getTime()) / 86400000);
+}
+
+function catalystTimingClass(days) {
+  if (days < 0) return "catalyst-overdue";
+  if (days <= 7) return "catalyst-imminent";
+  if (days <= 30) return "catalyst-soon";
+  return "catalyst-upcoming";
+}
+
+function formatDaysUntil(days) {
+  if (days < 0) return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "Today";
+  return `${days}d`;
+}
+
+function formatCatalystDate(dateValue) {
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return escapeHtml(dateValue);
+  return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatBiotechNotes(item) {
+  const notes = item.notes ? escapeHtml(item.notes) : "--";
+  if (!item.source) return notes;
+  const source = escapeHtml(item.source);
+  if (/^https?:\/\//i.test(item.source)) {
+    return `${notes}<span class="subtle block"><a class="symbol-link" href="${escapeAttribute(item.source)}" target="_blank" rel="noopener noreferrer">Source</a></span>`;
+  }
+  return `${notes}<span class="subtle block">${source}</span>`;
+}
+
+function impactClass(impact) {
+  if (impact === "High") return "impact-high";
+  if (impact === "Medium") return "impact-medium";
+  return "impact-low";
+}
+
+function impactWeight(impact) {
+  if (impact === "High") return 3;
+  if (impact === "Medium") return 2;
+  return 1;
 }
 
 function marketGroupLabel(item) {
@@ -787,12 +1055,20 @@ function formatOptionsSignal(signal) {
   return "Unavailable";
 }
 
+function clamp(value, low, high) {
+  return Math.max(low, Math.min(high, value));
+}
+
 function escapeAttribute(value) {
   return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function escapeHtml(value) {
+  return escapeAttribute(value);
 }
 
 async function init() {
@@ -804,6 +1080,8 @@ async function loadDashboard() {
   updateGrowthColumnHeader();
   runScan();
   runDiscover();
+  runOverextended();
+  loadBiotechCatalysts();
 }
 
 init();

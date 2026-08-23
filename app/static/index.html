@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stock Momentum AI</title>
-    <link rel="stylesheet" href="/static/styles.css?v=202608191255" />
+    <link rel="stylesheet" href="/static/styles.css?v=202608231100" />
   </head>
   <body>
     <section id="loginScreen" class="login-screen" hidden>
@@ -41,6 +41,8 @@
 
       <nav class="tabs" aria-label="Dashboard views">
         <button class="tab-button active" type="button" data-tab="discoveryPanel">Discovery</button>
+        <button class="tab-button" type="button" data-tab="overextendedPanel">Overextended</button>
+        <button class="tab-button" type="button" data-tab="biotechPanel">Biotech Catalysts</button>
         <button class="tab-button" type="button" data-tab="scannerPanel">Momentum Scanner</button>
       </nav>
 
@@ -170,6 +172,98 @@
         </div>
       </section>
 
+      <section id="overextendedPanel" class="tab-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Overextended</p>
+            <h2>Pullback Watch</h2>
+          </div>
+          <span id="overextendedMeta">Ready</span>
+        </div>
+
+        <div class="table-panel">
+          <div class="severity-legend" aria-label="Overextension severity">
+            <span><i class="severity-dot overextended-low"></i>Slight</span>
+            <span><i class="severity-dot overextended-medium"></i>Moderate</span>
+            <span><i class="severity-dot overextended-high"></i>High</span>
+            <span><i class="severity-dot overextended-extreme"></i>Very high</span>
+          </div>
+          <div class="table-wrap">
+            <table class="overextended-table">
+              <colgroup>
+                <col class="col-rank" />
+                <col class="col-symbol" />
+                <col class="col-price" />
+                <col class="col-score" />
+                <col class="col-growth" />
+                <col class="col-rsi" />
+                <col class="col-distance" />
+                <col class="col-distance" />
+                <col class="col-volume" />
+                <col class="col-setup" />
+                <col class="col-reason" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Symbol</th>
+                  <th>Price</th>
+                  <th>Risk</th>
+                  <th>1M Move</th>
+                  <th>RSI</th>
+                  <th>50D</th>
+                  <th>20D High</th>
+                  <th>Volume</th>
+                  <th>Setup</th>
+                  <th>Why</th>
+                </tr>
+              </thead>
+              <tbody id="overextendedBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="biotechPanel" class="tab-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Biotech Catalysts</p>
+            <h2>Future Event Tracker</h2>
+          </div>
+          <span id="biotechMeta">Ready</span>
+        </div>
+
+        <div class="table-panel">
+          <div class="table-wrap">
+            <table class="biotech-table">
+              <colgroup>
+                <col class="col-symbol" />
+                <col class="col-company" />
+                <col class="col-event" />
+                <col class="col-date" />
+                <col class="col-days" />
+                <col class="col-stage" />
+                <col class="col-impact" />
+                <col class="col-notes" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Company</th>
+                  <th>Event</th>
+                  <th>Date</th>
+                  <th>Days</th>
+                  <th>Stage</th>
+                  <th>Impact</th>
+                  <th>Notes / Source</th>
+                </tr>
+              </thead>
+              <tbody id="biotechBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section id="scannerPanel" class="tab-panel">
         <section class="controls" aria-label="Scanner controls">
           <label class="field field-wide">
@@ -252,6 +346,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=202608221200"></script>
+    <script src="/static/app.js?v=202608231100"></script>
   </body>
 </html>
