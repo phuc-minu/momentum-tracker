@@ -36,7 +36,11 @@ def test_score_symbol_returns_rankable_signal():
     assert 0 <= signal.score <= 100
     assert signal.grade in {"A", "B", "C", "D", "F"}
     assert signal.setup in {"breakout", "pullback", "extended", "base", "weak"}
-    assert signal.factors.return_3m is not None
+    assert signal.factors.return_1m is not None
+    assert signal.factors.return_3m is None
+    assert signal.factors.return_6m is None
+    assert signal.factors.return_12m is None
+    assert signal.factors.distance_to_200d_sma is None
     assert signal.factors.rsi_14 is not None
     assert 0 <= signal.factors.rsi_14 <= 100
     assert signal.factors.current_volume_ratio_20d is not None
@@ -261,7 +265,6 @@ def test_login_accepts_configured_password(monkeypatch):
 def test_live_scan_without_api_key_returns_503(monkeypatch):
     monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
     monkeypatch.delenv("FMP_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     client = TestClient(app)
     login(client)
 
@@ -797,9 +800,6 @@ def test_historical_bulk_candles_uses_fmp_eod_date(monkeypatch):
 
 
 def test_option_chain_returns_empty_without_options_provider(monkeypatch):
-    monkeypatch.delenv("OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
     client = MarketDataClient(api_key="test-token")
@@ -807,40 +807,19 @@ def test_option_chain_returns_empty_without_options_provider(monkeypatch):
     assert asyncio.run(client.option_chain("MSFT")) == []
 
 
-def test_option_chain_reads_marketdata_options_provider(monkeypatch):
-    monkeypatch.setenv("MARKETDATA_OPTIONS_API_KEY", "options-token")
-    client = MarketDataClient(api_key="test-token")
+def test_legacy_marketdata_env_vars_are_ignored(monkeypatch):
+    monkeypatch.setenv("MARKETDATA_API_KEY", "old-provider-token")
+    monkeypatch.setenv("MARKETDATA_OPTIONS_API_KEY", "old-options-token")
+    monkeypatch.delenv("FMP_API_KEY", raising=False)
+    monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
+    monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
+    client = MarketDataClient()
 
-    async def fake_get_marketdata_options(symbol):
-        assert symbol == "MSFT"
-        return {
-            "s": "ok",
-            "optionSymbol": ["MSFT260828C00490000", "MSFT260828P00470000"],
-            "symbol": ["MSFT", "MSFT"],
-            "expiration": ["2026-08-28", "2026-08-28"],
-            "strike": [490, 470],
-            "side": ["call", "put"],
-            "bid": [12.1, 8.2],
-            "ask": [12.5, 8.6],
-            "mid": [12.3, 8.4],
-            "delta": [0.7, -0.35],
-            "openInterest": [10000, 7000],
-            "volume": [6000, 1200],
-        }
-
-    monkeypatch.setattr(client, "_get_marketdata_options", fake_get_marketdata_options)
-
-    rows = asyncio.run(client.option_chain("MSFT"))
-
-    assert rows[0]["side"] == "call"
-    assert rows[0]["volume"] == 6000
-    assert rows[1]["side"] == "put"
+    assert client.api_key is None
+    assert asyncio.run(client.option_chain("MSFT")) == []
 
 
 def test_option_chain_normalizes_configured_row_provider(monkeypatch):
-    monkeypatch.delenv("OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.setenv("FMP_OPTIONS_CHAIN_PATH", "options-chain")
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
     client = MarketDataClient(api_key="test-token")
@@ -883,9 +862,6 @@ def test_option_chain_normalizes_configured_row_provider(monkeypatch):
 
 
 def test_option_chain_uses_fmp_positions_summary(monkeypatch):
-    monkeypatch.delenv("OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "true")
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_YEAR", "2026")

@@ -306,7 +306,7 @@ async def _build_live_price_candidate(
     period_days: int,
 ) -> DiscoveryCandidate | None:
     try:
-        candles = await client.candles(symbol, countback=max(period_days + 5, 260))
+        candles = await client.candles(symbol, countback=max(period_days + 30, 60))
     except MarketDataError:
         return None
     if not candles:
@@ -328,7 +328,7 @@ async def _enrich_live_candidate(
     period_days: int,
 ) -> DiscoveryCandidate | None:
     try:
-        candles = await client.candles(candidate.symbol, countback=max(period_days + 5, 260))
+        candles = await client.candles(candidate.symbol, countback=max(period_days + 30, 60))
     except MarketDataError:
         return None
 

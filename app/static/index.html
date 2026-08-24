@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stock Momentum AI</title>
-    <link rel="stylesheet" href="/static/styles.css?v=202608231100" />
+    <link rel="stylesheet" href="/static/styles.css?v=202608231220" />
   </head>
   <body>
     <section id="loginScreen" class="login-screen" hidden>
@@ -43,7 +43,6 @@
         <button class="tab-button active" type="button" data-tab="discoveryPanel">Discovery</button>
         <button class="tab-button" type="button" data-tab="overextendedPanel">Overextended</button>
         <button class="tab-button" type="button" data-tab="biotechPanel">Biotech Catalysts</button>
-        <button class="tab-button" type="button" data-tab="scannerPanel">Momentum Scanner</button>
       </nav>
 
       <section id="discoveryPanel" class="tab-panel active">
@@ -68,18 +67,15 @@
           <label class="field">
             <span>Period</span>
             <select id="periodInput">
-              <option value="20" selected>1 month</option>
-              <option value="60">3 months</option>
-              <option value="126">6 months</option>
-              <option value="252">12 months</option>
+              <option value="30" selected>30 days</option>
             </select>
           </label>
           <label class="field">
             <span>Limit</span>
             <select id="limitInput">
-              <option value="10" selected>Top 10</option>
+              <option value="10">Top 10</option>
               <option value="25">Top 25</option>
-              <option value="50">Top 50</option>
+              <option value="50" selected>Top 50</option>
             </select>
           </label>
           <label class="toggle">
@@ -264,88 +260,8 @@
         </div>
       </section>
 
-      <section id="scannerPanel" class="tab-panel">
-        <section class="controls" aria-label="Scanner controls">
-          <label class="field field-wide">
-            <span>Symbols</span>
-            <input id="symbolsInput" value="NVDA,MSFT,AAPL,AVGO,AMD,META,GOOGL,AMZN,TSLA" />
-          </label>
-          <label class="field">
-            <span>Benchmark</span>
-            <input id="benchmarkInput" value="" placeholder="Optional" />
-          </label>
-          <label class="field">
-            <span>History</span>
-            <select id="countbackInput">
-              <option value="180">180 days</option>
-              <option value="260" selected>260 days</option>
-              <option value="390">390 days</option>
-              <option value="520">520 days</option>
-            </select>
-          </label>
-          <button id="scanButton" class="primary-button" type="button">
-            <span class="button-icon">↻</span>
-            <span>Scan</span>
-          </button>
-        </section>
-
-        <section class="metrics" aria-label="Scan summary">
-          <div class="metric">
-            <span>Leaders</span>
-            <strong id="leaderCount">0</strong>
-          </div>
-          <div class="metric">
-            <span>Average Score</span>
-            <strong id="averageScore">--</strong>
-          </div>
-          <div class="metric">
-            <span>Top Setup</span>
-            <strong id="topSetup">--</strong>
-          </div>
-          <div class="metric">
-            <span>Mode</span>
-            <strong id="dataMode">--</strong>
-          </div>
-        </section>
-
-        <section class="workspace">
-          <div class="table-panel">
-            <div class="panel-heading">
-              <h2>Rankings</h2>
-              <span id="scanMeta">Ready</span>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Rank</th>
-                    <th>Symbol</th>
-                    <th>Score</th>
-                    <th>Grade</th>
-                    <th>Setup</th>
-                    <th>3M RS</th>
-                    <th>50D</th>
-                    <th>Volume</th>
-                  </tr>
-                </thead>
-                <tbody id="resultsBody"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <aside class="detail-panel">
-            <div class="panel-heading">
-              <h2 id="detailTitle">Details</h2>
-              <span id="detailGrade" class="grade-pill">--</span>
-            </div>
-            <canvas id="scoreCanvas" width="520" height="180" aria-label="Score distribution"></canvas>
-            <div id="factorGrid" class="factor-grid"></div>
-            <ul id="notesList" class="notes"></ul>
-          </aside>
-        </section>
-      </section>
     </main>
 
-    <script src="/static/app.js?v=202608231100"></script>
+    <script src="/static/app.js?v=202608231220"></script>
   </body>
 </html>

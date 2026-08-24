@@ -9,6 +9,9 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 node_modules/
+test-results/
+playwright-report/
+.playwright-mcp/
 dist/
 build/
 .copilot-azure/

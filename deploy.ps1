@@ -44,10 +44,6 @@ az role assignment create `
 Write-Host "Waiting for Key Vault RBAC propagation..."
 Start-Sleep -Seconds 30
 
-if ($env:MARKETDATA_API_KEY) {
-  az keyvault secret set --vault-name $vault --name marketdata-api-key --value $env:MARKETDATA_API_KEY --output none
-}
-
 if ($env:FMP_API_KEY) {
   az keyvault secret set --vault-name $vault --name fmp-api-key --value $env:FMP_API_KEY --output none
 }
@@ -91,7 +87,6 @@ function Add-SecretEnvIfPresent {
   }
 }
 
-Add-SecretEnvIfPresent "marketdata-api-key" "MARKETDATA_API_KEY"
 Add-SecretEnvIfPresent "fmp-api-key" "FMP_API_KEY"
 Add-SecretEnvIfPresent "openai-api-key" "OPENAI_API_KEY"
 Add-SecretEnvIfPresent "app-password" "APP_PASSWORD"
@@ -116,8 +111,6 @@ if ($envArgs.Count -gt 0) {
 $databaseSecretId = az keyvault secret show --vault-name $vault --name database-url --query id -o tsv 2>$null
 $fmpSecretId = az keyvault secret show --vault-name $vault --name fmp-api-key --query id -o tsv 2>$null
 if ($databaseSecretId -and $fmpSecretId) {
-  $marketDataSecretId = az keyvault secret show --vault-name $vault --name marketdata-api-key --query id -o tsv 2>$null
-  $includeMarketDataSecret = [bool]$marketDataSecretId
   az deployment group create `
     --resource-group $ResourceGroup `
     --template-file ./infra/db-refresh-job.bicep `
@@ -128,7 +121,6 @@ if ($databaseSecretId -and $fmpSecretId) {
       registryServer=$acrLogin `
       identityId=$identityId `
       keyVaultName=$vault `
-      includeMarketDataSecret=$includeMarketDataSecret `
     --output none
   Write-Host "Scheduled db refresh: weekdays at 22:30 UTC"
 } else {

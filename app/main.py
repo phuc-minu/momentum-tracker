@@ -37,7 +37,7 @@ async def no_cache_static_assets(request, call_next):
 def health():
     return {
         "status": "ok",
-        "marketdata_configured": bool(os.getenv("FMP_API_KEY") or os.getenv("MARKETDATA_API_KEY")),
+        "marketdata_configured": bool(os.getenv("FMP_API_KEY")),
         "provider": "fmp",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
     }
@@ -117,7 +117,7 @@ def universe(_: None = Depends(require_auth)):
 async def scan(
     symbols: str | None = Query(default=None, description="Comma-separated tickers. Defaults to DEFAULT_UNIVERSE."),
     benchmark: str = Query(default=""),
-    countback: int = Query(default=260, ge=80, le=520),
+    countback: int = Query(default=60, ge=30, le=120),
     demo: bool = Query(default=False, description="Use deterministic generated candles instead of live FMP data."),
     _: None = Depends(require_auth),
 ):

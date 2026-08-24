@@ -22,10 +22,6 @@ identity_id=$(echo "$outputs" | python -c 'import json,sys; print(json.load(sys.
 app=$(echo "$outputs" | python -c 'import json,sys; print(json.load(sys.stdin)["containerAppName"]["value"])')
 image_tag="$(date +%Y%m%d%H%M%S)"
 
-if [[ -n "${MARKETDATA_API_KEY:-}" ]]; then
-  az keyvault secret set --vault-name "$vault" --name marketdata-api-key --value "$MARKETDATA_API_KEY" >/dev/null
-fi
-
 if [[ -n "${FMP_API_KEY:-}" ]]; then
   az keyvault secret set --vault-name "$vault" --name fmp-api-key --value "$FMP_API_KEY" >/dev/null
 fi
@@ -64,7 +60,6 @@ add_secret_env_if_present() {
   fi
 }
 
-add_secret_env_if_present "marketdata-api-key" "MARKETDATA_API_KEY"
 add_secret_env_if_present "fmp-api-key" "FMP_API_KEY"
 add_secret_env_if_present "openai-api-key" "OPENAI_API_KEY"
 add_secret_env_if_present "app-password" "APP_PASSWORD"

@@ -34,7 +34,7 @@ def fetch_fmp_screener_symbols(
     min_average_volume: int | None = None,
     min_price: float | None = None,
 ) -> list[dict]:
-    api_key = os.getenv("FMP_API_KEY") or os.getenv("MARKETDATA_API_KEY")
+    api_key = os.getenv("FMP_API_KEY")
     if not api_key:
         raise RuntimeError("FMP_API_KEY is required for PHASE2_SYMBOL_SOURCE=fmp")
     params = {

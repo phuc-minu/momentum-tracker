@@ -15,7 +15,7 @@ class Candle(BaseModel):
 class ScanRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list)
     benchmark: str = ""
-    countback: int = Field(default=260, ge=80, le=520)
+    countback: int = Field(default=60, ge=30, le=120)
     demo: bool = False
 
 

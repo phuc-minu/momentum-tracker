@@ -42,13 +42,11 @@ This skill stores non-secret deployment memory for the Stock Momentum AI / Tech 
 
 Key Vault stores:
 - `openai-api-key`
-- `marketdata-api-key`
 - `fmp-api-key`
 - `database-url`
 
 Container App secret refs use the same secret names and expose:
 - `OPENAI_API_KEY=secretref:openai-api-key`
-- `MARKETDATA_API_KEY=secretref:marketdata-api-key`
 - `FMP_API_KEY=secretref:fmp-api-key`
 - `DATABASE_URL=secretref:database-url` when Phase 2 PostgreSQL is configured
 
@@ -70,7 +68,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 The normal script does all of the following:
 - Ensures Azure providers and resource group exist.
 - Deploys `infra/main.bicep`.
-- Writes `FMP_API_KEY`, `MARKETDATA_API_KEY`, and `OPENAI_API_KEY` from local environment variables into Key Vault when set.
+- Writes `FMP_API_KEY` and `OPENAI_API_KEY` from local environment variables into Key Vault when set.
 - Builds the app with ACR as `tech-momentum-ai:<timestamp>`.
 - Updates `momentumai-api` to the new image and secret references.
 
@@ -128,6 +126,7 @@ Safe refresh knobs:
 - `DISCOVERY_MIN_AVERAGE_VOLUME=3000000`
 - `PHASE2_SYMBOLS=NVDA,MSFT,...`
 - `PHASE2_SYMBOL_LIMIT=500`
+- `PHASE2_COUNTBACK=60`
 - `PHASE2_TOP_N=50`
 - `PHASE2_MIN_PRICE=10`
 - `PHASE2_FMP_CONCURRENCY=2`
@@ -155,10 +154,11 @@ Azure PostgreSQL access:
 - Azure CLI may require sandbox escalation because it reads `C:\Users\phuct\.azure\azureProfile.json`.
 - Git may warn about denied access to `C:\Users\phuct\.config\git\ignore`; this warning has not blocked commits or pushes.
 - `gh` CLI was not installed as of August 16, 2026. Use normal `git` for commit/push unless GitHub PR automation is specifically needed.
-- FMP is the current market data provider. Use `FMP_API_KEY` with base URL `https://financialmodelingprep.com/stable/`. Live Discovery and Phase 2 refresh default to FMP `company-screener` for symbol selection.
+- FMP is the only live market data provider. Use `FMP_API_KEY` with base URL `https://financialmodelingprep.com/stable/`. Live Discovery and Phase 2 refresh default to FMP `company-screener` for symbol selection.
 - The frontend now falls back to beta/demo data when live FMP scanner or discovery requests fail.
 - The dashboard and token-spending endpoints require login. `/health` and static assets remain public.
 - Phase 2 deliberately keeps broad market scans out of the user click path. Use scheduled refreshes and conservative symbol limits to control FMP usage.
+- Momentum scoring is 30-calendar-day focused. It no longer requires 200D SMA / one-year history; scheduled refreshes use `PHASE2_COUNTBACK=60` so 50D SMA remains available when possible.
 
 ## Recent Commits
 

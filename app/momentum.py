@@ -1,51 +1,40 @@
+from datetime import UTC, datetime, timedelta
 from statistics import fmean
 
 from schemas import Candle, MomentumFactors, MomentumSignal
 
 
 def score_symbol(symbol: str, candles: list[Candle], benchmark_candles: list[Candle]) -> MomentumSignal:
-    if len(candles) < 80:
-        raise ValueError(f"{symbol} needs at least 80 candles")
+    if len(candles) < 30:
+        raise ValueError(f"{symbol} needs at least 30 candles")
 
     closes = [c.close for c in candles]
     highs = [c.high for c in candles]
     volumes = [c.volume for c in candles]
     last_close = closes[-1]
 
-    return_1m = _return(closes, 21)
-    return_3m = _return(closes, 63)
-    return_6m = _return(closes, 126)
-    return_12m = _return(closes, 252)
-
-    benchmark_closes = [c.close for c in benchmark_candles]
-    benchmark_return_3m = _return(benchmark_closes, 63)
-    relative_strength_3m = _safe_subtract(return_3m, benchmark_return_3m)
+    return_1m = _calendar_day_return(candles, 30)
 
     high_20d = max(highs[-20:])
     sma_50 = _sma(closes, 50)
-    sma_200 = _sma(closes, 200)
-    volume_20 = _average(volumes[-20:])
-    volume_60 = _average(volumes[-60:])
     prior_volume_20 = _average(volumes[-21:-1]) if len(volumes) >= 21 else None
     rsi_14 = _rsi(closes, 14)
 
     distance_to_20d_high = _ratio(last_close, high_20d) - 1 if high_20d else None
     distance_to_50d_sma = _ratio(last_close, sma_50) - 1 if sma_50 else None
-    distance_to_200d_sma = _ratio(last_close, sma_200) - 1 if sma_200 else None
-    volume_ratio = _ratio(volume_20, volume_60) if volume_60 else None
     current_volume_ratio = _ratio(volumes[-1], prior_volume_20) if prior_volume_20 else None
 
     factors = MomentumFactors(
         return_1m=return_1m,
-        return_3m=return_3m,
-        return_6m=return_6m,
-        return_12m=return_12m,
-        benchmark_return_3m=benchmark_return_3m,
-        relative_strength_3m=relative_strength_3m,
+        return_3m=None,
+        return_6m=None,
+        return_12m=None,
+        benchmark_return_3m=None,
+        relative_strength_3m=None,
         distance_to_20d_high=distance_to_20d_high,
         distance_to_50d_sma=distance_to_50d_sma,
-        distance_to_200d_sma=distance_to_200d_sma,
-        volume_ratio_20d_vs_60d=volume_ratio,
+        distance_to_200d_sma=None,
+        volume_ratio_20d_vs_60d=None,
         current_volume_ratio_20d=current_volume_ratio,
         rsi_14=rsi_14,
     )
@@ -71,12 +60,8 @@ def _score(factors: MomentumFactors) -> float:
 
     if factors.distance_to_50d_sma is not None:
         raw += _clamp(factors.distance_to_50d_sma * 70, -10, 10)
-    if factors.distance_to_200d_sma is not None:
-        raw += _clamp(factors.distance_to_200d_sma * 35, -10, 10)
     if factors.distance_to_20d_high is not None:
         raw += _clamp((0.03 + factors.distance_to_20d_high) * 120, -8, 8)
-    if factors.volume_ratio_20d_vs_60d is not None:
-        raw += _clamp((factors.volume_ratio_20d_vs_60d - 1) * 14, -4, 6)
 
     return adjusted_momentum_score(
         _clamp(raw, 0, 94),
@@ -119,12 +104,10 @@ def grade_for_score(score: float) -> str:
 def _classify_setup(factors: MomentumFactors) -> str:
     near_high = factors.distance_to_20d_high is not None and factors.distance_to_20d_high >= -0.025
     above_50 = factors.distance_to_50d_sma is not None and factors.distance_to_50d_sma > 0
-    above_200 = factors.distance_to_200d_sma is not None and factors.distance_to_200d_sma > 0
     stretched = factors.distance_to_50d_sma is not None and factors.distance_to_50d_sma > 0.12
     constructive_pullback = (
         factors.distance_to_50d_sma is not None
         and -0.04 <= factors.distance_to_50d_sma <= 0.04
-        and above_200
     )
 
     if factors.return_1m is not None and factors.return_1m < -0.08:
@@ -133,19 +116,15 @@ def _classify_setup(factors: MomentumFactors) -> str:
         return "breakout"
     if constructive_pullback:
         return "pullback"
-    if stretched and above_200:
+    if stretched:
         return "extended"
     return "base"
 
 
 def _notes(factors: MomentumFactors, setup: str) -> list[str]:
     notes = [f"Setup reads as {setup}."]
-    if factors.relative_strength_3m is not None:
-        notes.append(f"3m relative strength vs benchmark is {_percent(factors.relative_strength_3m)}.")
     if factors.distance_to_50d_sma is not None:
         notes.append(f"Price is {_percent(factors.distance_to_50d_sma)} from the 50d SMA.")
-    if factors.volume_ratio_20d_vs_60d is not None:
-        notes.append(f"20d volume is {factors.volume_ratio_20d_vs_60d:.2f}x the 60d average.")
     if factors.current_volume_ratio_20d is not None:
         notes.append(f"Current volume is {factors.current_volume_ratio_20d:.2f}x the prior 20d average.")
     if factors.rsi_14 is not None:
@@ -157,6 +136,23 @@ def _return(values: list[float], periods: int) -> float | None:
     if len(values) <= periods or values[-periods - 1] == 0:
         return None
     return values[-1] / values[-periods - 1] - 1
+
+
+def _calendar_day_return(candles: list[Candle], days: int) -> float | None:
+    if len(candles) < 2:
+        return None
+    last_date = datetime.fromtimestamp(candles[-1].timestamp, UTC).date()
+    target_date = last_date - timedelta(days=days)
+    start_close = None
+    for candle in candles:
+        candle_date = datetime.fromtimestamp(candle.timestamp, UTC).date()
+        if candle_date <= target_date:
+            start_close = candle.close
+        else:
+            break
+    if start_close in (None, 0):
+        return None
+    return candles[-1].close / start_close - 1
 
 
 def _sma(values: list[float], periods: int) -> float | None:

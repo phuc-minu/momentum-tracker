@@ -1,6 +1,4 @@
 const state = {
-  results: [],
-  selectedSymbol: null,
   liveDataAvailable: false,
   discoveryRows: [],
   overextendedRows: [],
@@ -71,21 +69,6 @@ const elements = {
   apiStatus: document.querySelector("#apiStatus"),
   apiStatusText: document.querySelector("#apiStatusText"),
   modeNotice: document.querySelector("#modeNotice"),
-  symbolsInput: document.querySelector("#symbolsInput"),
-  benchmarkInput: document.querySelector("#benchmarkInput"),
-  countbackInput: document.querySelector("#countbackInput"),
-  scanButton: document.querySelector("#scanButton"),
-  leaderCount: document.querySelector("#leaderCount"),
-  averageScore: document.querySelector("#averageScore"),
-  topSetup: document.querySelector("#topSetup"),
-  dataMode: document.querySelector("#dataMode"),
-  scanMeta: document.querySelector("#scanMeta"),
-  resultsBody: document.querySelector("#resultsBody"),
-  detailTitle: document.querySelector("#detailTitle"),
-  detailGrade: document.querySelector("#detailGrade"),
-  factorGrid: document.querySelector("#factorGrid"),
-  notesList: document.querySelector("#notesList"),
-  scoreCanvas: document.querySelector("#scoreCanvas"),
   growthInput: document.querySelector("#growthInput"),
   periodInput: document.querySelector("#periodInput"),
   limitInput: document.querySelector("#limitInput"),
@@ -108,16 +91,12 @@ const DEFAULT_BUTTON_LABELS = new WeakMap();
 
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
-elements.scanButton.addEventListener("click", runScan);
 elements.discoverButton.addEventListener("click", runDiscover);
 elements.tabButtons.forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
 });
 elements.discoverySortButtons.forEach((button) => {
   button.addEventListener("click", () => setDiscoverySort(button.dataset.sortKey));
-});
-elements.symbolsInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") runScan();
 });
 elements.periodInput.addEventListener("change", () => updateGrowthColumnHeader());
 updateDiscoverySortIndicators();
@@ -190,7 +169,6 @@ async function login(event) {
 
 async function logout() {
   await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
-  state.results = [];
   elements.passwordInput.value = "";
   showLogin();
 }
@@ -200,81 +178,12 @@ function showLogin(message = "") {
   elements.loginScreen.hidden = false;
   elements.loginMessage.textContent = message;
   setButtonLoading(elements.discoverButton, false);
-  setButtonLoading(elements.scanButton, false);
   elements.passwordInput.focus();
 }
 
 function showDashboard() {
   elements.loginScreen.hidden = true;
   elements.dashboard.hidden = false;
-}
-
-async function runScan() {
-  const params = new URLSearchParams({
-    symbols: elements.symbolsInput.value,
-    benchmark: elements.benchmarkInput.value.trim(),
-    countback: elements.countbackInput.value,
-    demo: state.liveDataAvailable ? "false" : "true",
-  });
-
-  setButtonLoading(elements.scanButton, true, "Scanning");
-  elements.scanMeta.textContent = "Scanning";
-
-  try {
-    const response = await fetch(`/scan?${params.toString()}`, { credentials: "same-origin" });
-    const payload = await readJsonResponse(response);
-    requireAuthenticated(response, payload);
-    if (!response.ok) throw new Error(payload.detail || "Scan failed");
-
-    state.results = payload.results;
-    state.selectedSymbol = payload.results[0]?.symbol || null;
-    renderSummary(payload);
-    renderTable();
-    renderDetail();
-    drawScores();
-  } catch (error) {
-    if (error instanceof AuthRequiredError) return;
-    if (state.liveDataAvailable) {
-      try {
-        await runScanFallback(error.message);
-      } catch (fallbackError) {
-        elements.scanMeta.textContent = fallbackError.message;
-        state.results = [];
-        renderTable();
-        renderEmptyDetail(fallbackError.message);
-        drawScores();
-        renderModeNotice(`Live scanner request failed. ${error.message}`);
-      }
-    } else {
-      elements.scanMeta.textContent = error.message;
-      state.results = [];
-      renderTable();
-      renderEmptyDetail(error.message);
-      drawScores();
-    }
-  } finally {
-    setButtonLoading(elements.scanButton, false);
-  }
-}
-
-async function runScanFallback(reason) {
-  const params = new URLSearchParams({
-    symbols: elements.symbolsInput.value,
-    benchmark: elements.benchmarkInput.value.trim(),
-    countback: elements.countbackInput.value,
-    demo: "true",
-  });
-  const response = await fetch(`/scan?${params.toString()}`, { credentials: "same-origin" });
-  const payload = await readJsonResponse(response);
-  requireAuthenticated(response, payload);
-  if (!response.ok) throw new Error(payload.detail || reason);
-  state.results = payload.results;
-  state.selectedSymbol = payload.results[0]?.symbol || null;
-  renderSummary(payload);
-  renderTable();
-  renderDetail();
-  drawScores();
-  renderModeNotice(`Live scanner request failed. Showing beta data. ${reason}`);
 }
 
 async function runDiscover() {
@@ -573,9 +482,6 @@ function pullbackRiskScore(item, factors) {
   if (factors.distance_to_50d_sma !== null && factors.distance_to_50d_sma !== undefined) {
     score += clamp((factors.distance_to_50d_sma - 0.12) * 80, 0, 30);
   }
-  if (factors.distance_to_200d_sma !== null && factors.distance_to_200d_sma !== undefined) {
-    score += clamp((factors.distance_to_200d_sma - 0.30) * 25, 0, 15);
-  }
   if (factors.return_1m !== null && factors.return_1m !== undefined) {
     score += clamp((factors.return_1m - 0.20) * 35, 0, 18);
   }
@@ -756,9 +662,6 @@ function formatExchange(exchange) {
 }
 
 function phase2Growth(factors, periodDays) {
-  if (periodDays === 60) return factors.return_3m;
-  if (periodDays === 126) return factors.return_6m;
-  if (periodDays === 252) return factors.return_12m;
   return factors.return_1m;
 }
 
@@ -775,8 +678,7 @@ function updateGrowthColumnHeader(periodDays = Number(elements.periodInput.value
 
 function periodLabel(periodDays) {
   if (periodDays === 10) return "2W";
-  if (periodDays === 20) return "1M";
-  if (periodDays === 60) return "3M";
+  if (periodDays === 20 || periodDays === 30) return "30D";
   return `${periodDays}D`;
 }
 
@@ -796,18 +698,6 @@ function requireAuthenticated(response, payload) {
   throw new AuthRequiredError("Login required");
 }
 
-function renderSummary(payload) {
-  const average = payload.results.length
-    ? payload.results.reduce((total, item) => total + item.score, 0) / payload.results.length
-    : 0;
-  elements.leaderCount.textContent = String(payload.count);
-  elements.averageScore.textContent = payload.results.length ? average.toFixed(1) : "--";
-  elements.topSetup.textContent = payload.results[0]?.setup || "--";
-  elements.dataMode.textContent = displayMode(payload.data_mode);
-  const skipped = payload.skipped_symbols?.length ? `, skipped ${payload.skipped_symbols.join(", ")}` : "";
-  elements.scanMeta.textContent = payload.benchmark ? `${payload.count} symbols vs ${payload.benchmark}${skipped}` : `${payload.count} symbols${skipped}`;
-}
-
 function renderModeNotice(message) {
   if (message) {
     elements.modeNotice.textContent = message;
@@ -815,121 +705,12 @@ function renderModeNotice(message) {
     return;
   }
   if (state.liveDataAvailable) {
-    elements.modeNotice.textContent = "Phase 2 mode: discovery reads precomputed PostgreSQL candidates; manual scanner still uses live FMP data.";
+    elements.modeNotice.textContent = "Phase 2 mode: discovery reads precomputed PostgreSQL candidates from live FMP refreshes.";
     elements.modeNotice.className = "mode-notice live";
   } else {
     elements.modeNotice.textContent = "Beta data mode: live FMP data is not configured yet, so displayed growth and options values are generated preview data.";
     elements.modeNotice.className = "mode-notice beta";
   }
-}
-
-function renderTable() {
-  if (!state.results.length) {
-    elements.resultsBody.innerHTML = `<tr><td class="empty-state" colspan="8">No scan results</td></tr>`;
-    return;
-  }
-
-  elements.resultsBody.innerHTML = state.results
-    .map((item, index) => {
-      const factors = item.factors;
-      const selected = item.symbol === state.selectedSymbol ? "selected" : "";
-      return `
-        <tr class="${selected}" data-symbol="${item.symbol}">
-          <td>${index + 1}</td>
-          <td><strong>${item.symbol}</strong></td>
-          <td>
-            <div class="score-cell">
-              <strong>${item.score.toFixed(1)}</strong>
-              <span class="score-bar"><span style="width:${item.score}%"></span></span>
-            </div>
-          </td>
-          <td><span class="grade-pill">${item.grade}</span></td>
-          <td><span class="setup-pill">${item.setup}</span></td>
-          <td>${formatPercent(factors.relative_strength_3m)}</td>
-          <td>${formatPercent(factors.distance_to_50d_sma)}</td>
-          <td>${formatRatio(factors.current_volume_ratio_20d ?? factors.volume_ratio_20d_vs_60d)}</td>
-        </tr>
-      `;
-    })
-    .join("");
-
-  document.querySelectorAll("#resultsBody tr[data-symbol]").forEach((row) => {
-    row.addEventListener("click", () => {
-      state.selectedSymbol = row.dataset.symbol;
-      renderTable();
-      renderDetail();
-      drawScores();
-    });
-  });
-}
-
-function renderDetail() {
-  const item = state.results.find((candidate) => candidate.symbol === state.selectedSymbol);
-  if (!item) {
-    renderEmptyDetail("Select a ranked symbol");
-    return;
-  }
-
-  elements.detailTitle.textContent = `${item.symbol} ${item.setup}`;
-  elements.detailGrade.textContent = item.grade;
-  elements.factorGrid.innerHTML = [
-    ["1M Return", formatPercent(item.factors.return_1m)],
-    ["3M Return", formatPercent(item.factors.return_3m)],
-    ["6M Return", formatPercent(item.factors.return_6m)],
-    ["12M Return", formatPercent(item.factors.return_12m)],
-    ["3M RS", formatPercent(item.factors.relative_strength_3m)],
-    ["20D High", formatPercent(item.factors.distance_to_20d_high)],
-    ["50D SMA", formatPercent(item.factors.distance_to_50d_sma)],
-    ["200D SMA", formatPercent(item.factors.distance_to_200d_sma)],
-    ["RSI", formatRsi(item.factors.rsi_14)],
-  ]
-    .map(([label, value]) => `<div class="factor"><span>${label}</span><strong>${value}</strong></div>`)
-    .join("");
-  elements.notesList.innerHTML = item.notes.map((note) => `<li>${note}</li>`).join("");
-}
-
-function renderEmptyDetail(message) {
-  elements.detailTitle.textContent = "Details";
-  elements.detailGrade.textContent = "--";
-  elements.factorGrid.innerHTML = "";
-  elements.notesList.innerHTML = `<li>${message}</li>`;
-}
-
-function drawScores() {
-  const canvas = elements.scoreCanvas;
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
-  context.clearRect(0, 0, width, height);
-  context.fillStyle = "#fbfcfe";
-  context.fillRect(0, 0, width, height);
-
-  if (!state.results.length) return;
-
-  const gap = 12;
-  const topPad = 18;
-  const bottomPad = 34;
-  const leftPad = 34;
-  const barWidth = (width - leftPad - gap * (state.results.length + 1)) / state.results.length;
-  const chartHeight = height - topPad - bottomPad;
-
-  context.strokeStyle = "#d9e0ea";
-  context.beginPath();
-  context.moveTo(leftPad, height - bottomPad);
-  context.lineTo(width - 10, height - bottomPad);
-  context.stroke();
-
-  state.results.forEach((item, index) => {
-    const x = leftPad + gap + index * (barWidth + gap);
-    const barHeight = Math.max(4, (item.score / 100) * chartHeight);
-    const y = height - bottomPad - barHeight;
-    context.fillStyle = item.symbol === state.selectedSymbol ? "#087f8c" : "#94a3b8";
-    context.fillRect(x, y, barWidth, barHeight);
-    context.fillStyle = "#344054";
-    context.font = "12px Segoe UI, sans-serif";
-    context.textAlign = "center";
-    context.fillText(item.symbol, x + barWidth / 2, height - 12);
-  });
 }
 
 function formatPercent(value) {
@@ -1078,7 +859,6 @@ async function init() {
 async function loadDashboard() {
   await checkHealth();
   updateGrowthColumnHeader();
-  runScan();
   runDiscover();
   runOverextended();
   loadBiotechCatalysts();

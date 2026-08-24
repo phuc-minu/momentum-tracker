@@ -21,9 +21,6 @@ param identityId string
 @description('Key Vault containing the database and provider secrets.')
 param keyVaultName string
 
-@description('Include MarketData options enrichment when its Key Vault secret exists.')
-param includeMarketDataSecret bool = false
-
 var databaseSecret = {
   name: 'database-url'
   keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/database-url'
@@ -34,19 +31,6 @@ var fmpSecret = {
   keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/fmp-api-key'
   identity: identityId
 }
-var marketDataSecrets = includeMarketDataSecret ? [
-  {
-    name: 'marketdata-api-key'
-    keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/marketdata-api-key'
-    identity: identityId
-  }
-] : []
-var marketDataEnvironment = includeMarketDataSecret ? [
-  {
-    name: 'MARKETDATA_API_KEY'
-    secretRef: 'marketdata-api-key'
-  }
-] : []
 
 resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
   name: jobName
@@ -74,10 +58,10 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
           identity: identityId
         }
       ]
-      secrets: concat([
+      secrets: [
         databaseSecret
         fmpSecret
-      ], marketDataSecrets)
+      ]
     }
     template: {
       containers: [
@@ -90,7 +74,7 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
           args: [
             'phase2_refresh.py'
           ]
-          env: concat([
+          env: [
             {
               name: 'DATABASE_URL'
               secretRef: 'database-url'
@@ -121,7 +105,7 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
             }
             {
               name: 'PHASE2_COUNTBACK'
-              value: '260'
+              value: '60'
             }
             {
               name: 'PHASE2_MIN_AVERAGE_VOLUME'
@@ -143,19 +127,7 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
               name: 'FMP_POSITIONS_SUMMARY_ENABLED'
               value: 'false'
             }
-            {
-              name: 'MARKETDATA_PROVIDER_CACHE'
-              value: 'false'
-            }
-            {
-              name: 'MARKETDATA_OPTION_STRIKE_LIMIT'
-              value: '5'
-            }
-            {
-              name: 'MARKETDATA_OPTION_DTE'
-              value: '14'
-            }
-          ], marketDataEnvironment)
+          ]
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
