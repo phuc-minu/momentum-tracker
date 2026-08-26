@@ -141,7 +141,7 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
               }
               {
                 name: 'MARKETDATA_OPTIONS_DTE'
-                value: '30'
+                value: '10'
               }
               {
                 name: 'MARKETDATA_OPTIONS_STRIKE_LIMIT'

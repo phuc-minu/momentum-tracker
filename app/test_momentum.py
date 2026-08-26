@@ -876,7 +876,7 @@ def test_option_chain_normalizes_marketdata_columnar_provider(monkeypatch):
 
     async def fake_marketdata_get(url, params, *, cache_ttl_seconds=300):
         assert url.endswith("/options/chain/AAPL/")
-        assert params["dte"] == "30"
+        assert params["dte"] == "10"
         assert params["strikeLimit"] == "8"
         return {
             "s": "ok",
@@ -979,8 +979,21 @@ def test_option_chain_uses_fmp_positions_summary(monkeypatch):
     activity = analyze_options_activity(asyncio.run(client.option_chain("AAPL")))
 
     assert activity["put_call_ratio"] == 0.25
-    assert activity["put_call_source"] == "institutional"
+    assert activity["put_call_source"] == "volume"
     assert activity["call_volume"] == 10000
+
+
+def test_put_call_ratio_is_volume_only():
+    activity = analyze_options_activity(
+        [
+            {"side": "call", "volume": 0, "openInterest": 10000},
+            {"side": "put", "volume": 0, "openInterest": 5000},
+        ]
+    )
+
+    assert activity["put_call_ratio"] is None
+    assert activity["put_call_source"] == "unavailable"
+    assert activity["call_open_interest"] == 10000
 
 
 def test_options_confirmation_score_rewards_bullish_call_activity():

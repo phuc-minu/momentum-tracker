@@ -147,10 +147,6 @@ class MarketDataClient:
         volume_ratio = _put_call_ratio_from_rows(rows, "volume")
         if volume_ratio is not None:
             return volume_ratio, "volume"
-
-        open_interest_ratio = _put_call_ratio_from_rows(rows, "openInterest")
-        if open_interest_ratio is not None:
-            return open_interest_ratio, "open_interest"
         return None, "unavailable"
 
     async def option_chain(self, symbol: str) -> list[dict]:
@@ -310,7 +306,7 @@ def _fmp_positions_summary_params(symbol: str) -> dict[str, int | str]:
 
 def _marketdata_options_params() -> dict[str, str]:
     params = {
-        "dte": os.getenv("MARKETDATA_OPTIONS_DTE", "30"),
+        "dte": os.getenv("MARKETDATA_OPTIONS_DTE", "10"),
         "strikeLimit": os.getenv("MARKETDATA_OPTIONS_STRIKE_LIMIT", "8"),
         "weekly": os.getenv("MARKETDATA_OPTIONS_WEEKLY", "true"),
         "monthly": os.getenv("MARKETDATA_OPTIONS_MONTHLY", "true"),

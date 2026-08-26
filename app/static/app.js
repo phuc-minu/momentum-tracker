@@ -55,7 +55,7 @@ const DISCOVERY_SORT_CONFIG = {
   growth: { type: "number", direction: "desc", value: (item) => item.return_2w },
   volume: { type: "number", direction: "desc", value: (item) => item.volume_ratio_20d },
   calls: { type: "number", direction: "desc", value: (item) => item.call_volume },
-  options: { type: "number", direction: "desc", value: (item) => item.options_confirmation_score },
+  options: { type: "number", direction: "asc", value: (item) => item.put_call_ratio },
 };
 
 const elements = {
@@ -423,7 +423,7 @@ function renderSortedDiscoveryRows() {
           <td>${formatSignal(item.price_signal)}</td>
           <td>${formatRatio(item.volume_ratio_20d)}</td>
           <td>${formatCallActivity(item)}</td>
-          <td>${formatOptionsConfirmation(item)}</td>
+          <td>${formatPutCallVolumeRatio(item)}</td>
           <td class="catalyst-cell">${formatCatalystSetup(item)}</td>
         </tr>
       `;
@@ -451,6 +451,8 @@ function phase2ToDiscoveryRow(item, periodDays) {
     call_open_interest: item.call_open_interest,
     call_activity_ratio: item.call_activity_ratio,
     call_activity: item.call_activity || "unavailable",
+    put_call_ratio: item.put_call_ratio,
+    put_call_source: item.put_call_source || "unavailable",
     options_confirmation_score: item.options_confirmation_score,
     options_signal: item.options_signal || "Options unavailable",
     catalyst: "PostgreSQL refresh",
@@ -747,11 +749,12 @@ function formatCallActivity(item) {
   return `<span class="${className}">${formatActivity(item.call_activity)}</span><span class="subtle block">${volume}</span>`;
 }
 
-function formatOptionsConfirmation(item) {
-  if (item.options_confirmation_score === null || item.options_confirmation_score === undefined) return "--";
-  const className = item.options_confirmation_score >= 65 ? "positive" : item.options_confirmation_score < 50 ? "negative" : "";
-  const hint = escapeAttribute(optionsHint(item));
-  return `<strong class="${className}" title="${hint}" aria-label="${hint}">${item.options_confirmation_score.toFixed(0)}</strong><span class="subtle block" title="${hint}">${formatOptionsSignal(item.options_signal)}</span>`;
+function formatPutCallVolumeRatio(item) {
+  if (item.put_call_ratio === null || item.put_call_ratio === undefined) return "--";
+  const ratio = Number(item.put_call_ratio);
+  const className = ratio <= 0.7 ? "positive" : ratio >= 1.2 ? "negative" : "";
+  const hint = escapeAttribute(putCallHint(item));
+  return `<strong class="${className}" title="${hint}" aria-label="${hint}">${ratio.toFixed(2)}</strong><span class="subtle block" title="${hint}">Vol ratio</span>`;
 }
 
 function scoreHint(item) {
@@ -765,17 +768,16 @@ function scoreHint(item) {
   ].filter(Boolean).join(" ");
 }
 
-function optionsHint(item) {
+function putCallHint(item) {
   const pieces = [
-    `Options confirmation score ${item.options_confirmation_score.toFixed(0)} out of 100.`,
-    `${item.options_signal}.`,
-    "Uses call volume, call volume vs open interest, and preferred contract delta.",
+    `Put/call volume ratio ${Number(item.put_call_ratio).toFixed(2)}.`,
+    "Calculated as 10-DTE put volume divided by 10-DTE call volume.",
   ];
   if (item.call_volume) {
     pieces.push(`Call volume: ${compactNumber(item.call_volume)}.`);
   }
-  if (item.call_activity_ratio !== null && item.call_activity_ratio !== undefined) {
-    pieces.push(`Call volume/OI: ${item.call_activity_ratio.toFixed(2)}x.`);
+  if (item.put_call_source) {
+    pieces.push(`Source: ${item.put_call_source}.`);
   }
   return pieces.join(" ");
 }

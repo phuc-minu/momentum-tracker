@@ -7,14 +7,10 @@ from schemas import PreferredContract
 def analyze_options_activity(rows: list[dict]) -> dict:
     put_volume = _sum_side(rows, "put", "volume")
     call_volume = _sum_side(rows, "call", "volume")
-    put_open_interest = _sum_side(rows, "put", "openInterest")
     call_open_interest = _sum_side(rows, "call", "openInterest")
 
     put_call_ratio = _ratio(put_volume, call_volume)
-    put_call_source = _option_source(rows) or "volume"
-    if put_call_ratio is None:
-        put_call_ratio = _ratio(put_open_interest, call_open_interest)
-        put_call_source = "open_interest" if put_call_ratio is not None else "unavailable"
+    put_call_source = "volume" if put_call_ratio is not None else "unavailable"
 
     call_activity_ratio = _ratio(call_volume, call_open_interest)
     call_activity = _classify_call_activity(call_volume, call_activity_ratio)
@@ -203,13 +199,6 @@ def _classify_call_activity(
     if call_volume >= 2_000 and (call_activity_ratio or 0) >= 0.2:
         return "elevated"
     return "normal"
-
-
-def _option_source(rows: list[dict]) -> str | None:
-    sources = {str(row.get("source", "")).lower() for row in rows if row.get("source")}
-    if "institutional" in sources:
-        return "institutional"
-    return None
 
 
 def _expiration_distance(raw_expiration) -> int:

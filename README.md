@@ -45,11 +45,11 @@ $env:MARKETDATA_REFERENCE_CACHE_SECONDS="3600"
 $env:FMP_BASE_URL="https://financialmodelingprep.com/stable/"
 $env:DISCOVERY_OPTIONS="true"
 $env:MARKETDATA_OPTIONS_API_KEY="YOUR_MARKETDATA_APP_TOKEN"
-$env:MARKETDATA_OPTIONS_DTE="30"
+$env:MARKETDATA_OPTIONS_DTE="10"
 $env:MARKETDATA_OPTIONS_STRIKE_LIMIT="8"
 ```
 
-`DISCOVERY_OPTIONS=true` enables options enrichment. MarketData.app options chains are preferred when a MarketData token is configured; otherwise the app can use an FMP-compatible options endpoint through `FMP_OPTIONS_CHAIN_PATH` or return options fields as unavailable.
+`DISCOVERY_OPTIONS=true` enables options enrichment. MarketData.app options chains are preferred when a MarketData token is configured; otherwise the app can use an FMP-compatible options endpoint through `FMP_OPTIONS_CHAIN_PATH` or return options fields as unavailable. The put/call ratio is calculated from 10-DTE option-chain volume only: total put volume divided by total call volume.
 
 ## API
 
