@@ -396,8 +396,8 @@ async def _score_options(
         return [_option_activity_to_db(symbol, demo_options_activity(symbol)) for symbol in symbols]
 
     client = MarketDataClient(timeout_seconds=30.0)
-    if not client.api_key:
-        raise MarketDataError("FMP_API_KEY is required for Phase 2 live options refresh")
+    if not client.options_configured:
+        raise MarketDataError("An options provider token is required for Phase 2 live options refresh")
 
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 

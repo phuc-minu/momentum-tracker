@@ -801,13 +801,16 @@ def test_historical_bulk_candles_uses_fmp_eod_date(monkeypatch):
 
 def test_option_chain_returns_empty_without_options_provider(monkeypatch):
     monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
+    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_TOKEN", raising=False)
+    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
     client = MarketDataClient(api_key="test-token")
 
     assert asyncio.run(client.option_chain("MSFT")) == []
 
 
-def test_legacy_marketdata_env_vars_are_ignored(monkeypatch):
+def test_marketdata_env_var_is_used_for_options_only(monkeypatch):
     monkeypatch.setenv("MARKETDATA_API_KEY", "old-provider-token")
     monkeypatch.setenv("MARKETDATA_OPTIONS_API_KEY", "old-options-token")
     monkeypatch.delenv("FMP_API_KEY", raising=False)
@@ -816,10 +819,47 @@ def test_legacy_marketdata_env_vars_are_ignored(monkeypatch):
     client = MarketDataClient()
 
     assert client.api_key is None
-    assert asyncio.run(client.option_chain("MSFT")) == []
+    assert client.marketdata_options_token == "old-options-token"
+
+
+def test_option_chain_normalizes_marketdata_columnar_provider(monkeypatch):
+    monkeypatch.setenv("MARKETDATA_OPTIONS_API_KEY", "options-token")
+    monkeypatch.delenv("FMP_API_KEY", raising=False)
+    client = MarketDataClient()
+
+    async def fake_marketdata_get(url, params, *, cache_ttl_seconds=300):
+        assert url.endswith("/options/chain/AAPL/")
+        assert params["dte"] == "30"
+        assert params["strikeLimit"] == "8"
+        return {
+            "s": "ok",
+            "optionSymbol": ["AAPL260828C00300000", "AAPL260828P00290000"],
+            "underlying": ["AAPL", "AAPL"],
+            "expiration": [1787875200, 1787875200],
+            "side": ["call", "put"],
+            "strike": [300, 290],
+            "bid": [5, 1.1],
+            "ask": [5.4, 1.3],
+            "mid": [5.2, 1.2],
+            "openInterest": [10000, 9000],
+            "volume": [5000, 1500],
+        }
+
+    monkeypatch.setattr(client, "_marketdata_get", fake_marketdata_get)
+
+    rows = asyncio.run(client.option_chain("AAPL"))
+
+    assert rows[0]["side"] == "call"
+    assert rows[0]["optionSymbol"] == "AAPL260828C00300000"
+    assert rows[0]["symbol"] == "AAPL"
+    assert rows[0]["mid"] == 5.2
+    assert rows[1]["side"] == "put"
 
 
 def test_option_chain_normalizes_configured_row_provider(monkeypatch):
+    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_TOKEN", raising=False)
+    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.setenv("FMP_OPTIONS_CHAIN_PATH", "options-chain")
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
     client = MarketDataClient(api_key="test-token")
@@ -862,6 +902,9 @@ def test_option_chain_normalizes_configured_row_provider(monkeypatch):
 
 
 def test_option_chain_uses_fmp_positions_summary(monkeypatch):
+    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
+    monkeypatch.delenv("MARKETDATA_TOKEN", raising=False)
+    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "true")
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_YEAR", "2026")

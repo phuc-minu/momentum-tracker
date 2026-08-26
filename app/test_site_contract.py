@@ -98,6 +98,7 @@ def test_health_endpoint_exposes_site_runtime_status():
         "status",
         "marketdata_configured",
         "provider",
+        "options_provider",
         "openai_configured",
     }
     assert response.json()["status"] == "ok"

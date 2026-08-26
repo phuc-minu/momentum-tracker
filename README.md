@@ -31,9 +31,9 @@ $env:FMP_API_KEY="YOUR_FMP_TOKEN"
 Invoke-RestMethod "http://127.0.0.1:8000/scan?symbols=NVDA,MSFT,AAPL,AVGO"
 ```
 
-## FMP Request Controls
+## Market Data Controls
 
-FMP is the only live market data provider. Live FMP responses are cached on disk under `app/.cache/marketdata` by default. Historical dated candles are cached without expiry; latest quote, news, and earnings responses use short TTLs so repeated dashboard scans do not repull the same provider data.
+FMP is the live provider for prices, candles, news, earnings, and symbol discovery. MarketData.app can be used as an options-only provider when `MARKETDATA_OPTIONS_API_KEY`, `MARKETDATA_TOKEN`, or the legacy `MARKETDATA_API_KEY` is configured. Live provider responses are cached on disk under `app/.cache/marketdata` by default. Historical dated candles are cached without expiry; latest quote, news, earnings, and options responses use short TTLs so repeated dashboard scans do not repull the same provider data.
 
 Useful settings:
 
@@ -44,9 +44,12 @@ $env:MARKETDATA_CANDLE_CACHE_SECONDS="900"
 $env:MARKETDATA_REFERENCE_CACHE_SECONDS="3600"
 $env:FMP_BASE_URL="https://financialmodelingprep.com/stable/"
 $env:DISCOVERY_OPTIONS="true"
+$env:MARKETDATA_OPTIONS_API_KEY="YOUR_MARKETDATA_APP_TOKEN"
+$env:MARKETDATA_OPTIONS_DTE="30"
+$env:MARKETDATA_OPTIONS_STRIKE_LIMIT="8"
 ```
 
-`DISCOVERY_OPTIONS=true` enables options enrichment only when an FMP-compatible options endpoint is wired through `FMP_OPTIONS_CHAIN_PATH`. Until then, options fields are returned as unavailable.
+`DISCOVERY_OPTIONS=true` enables options enrichment. MarketData.app options chains are preferred when a MarketData token is configured; otherwise the app can use an FMP-compatible options endpoint through `FMP_OPTIONS_CHAIN_PATH` or return options fields as unavailable.
 
 ## API
 
@@ -100,7 +103,7 @@ $env:PHASE2_FMP_CONCURRENCY="2"
 ..\.venv\Scripts\python.exe phase2_refresh.py --top 50
 ```
 
-Azure runs the same `db refresh` job automatically at `22:30 UTC` Monday through Friday using the `momentumai-db-refresh` Container Apps Job. Scheduled-job cron expressions use UTC. The deployment script creates or updates the job whenever the required `database-url` and `fmp-api-key` Key Vault secrets are available. Discovery defaults to stocks priced above `$10` through `PHASE2_MIN_PRICE=10`.
+Azure runs the same `db refresh` job automatically at `22:30 UTC` Monday through Friday using the `momentumai-db-refresh` Container Apps Job. Scheduled-job cron expressions use UTC. The deployment script creates or updates the job whenever the required `database-url` and `fmp-api-key` Key Vault secrets are available. If the optional `marketdata-api-key` Key Vault secret exists, the job exposes it as `MARKETDATA_OPTIONS_API_KEY` for options enrichment. Discovery defaults to stocks priced above `$10` through `PHASE2_MIN_PRICE=10`.
 
 Discovery mode and broader scheduled refreshes use `PHASE2_SYMBOL_SOURCE=fmp` by default to start from the FMP `company-screener` endpoint filtered by volume and price. Phase 2 then ranks that FMP screener pool by price movement over the last `PHASE2_PRICE_MOVEMENT_DAYS=30` calendar days and keeps `PHASE2_MOVER_LIMIT=50` symbols before momentum/options scoring. Use `DISCOVERY_SYMBOL_LIMIT` / `PHASE2_SYMBOL_LIMIT` to cap the FMP screener pool size and `DISCOVERY_MIN_AVERAGE_VOLUME` / `PHASE2_MIN_AVERAGE_VOLUME` to control the liquidity filter. Use `DISCOVERY_SYMBOL_SOURCE=static` only as a local fallback. Options and LLM enrichment should remain downstream-only for the top candidates.
 

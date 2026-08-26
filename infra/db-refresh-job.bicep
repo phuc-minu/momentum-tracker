@@ -21,6 +21,9 @@ param identityId string
 @description('Key Vault containing the database and provider secrets.')
 param keyVaultName string
 
+@description('Whether to expose the optional MarketData.app token for options-only enrichment.')
+param includeMarketDataOptionsSecret bool = false
+
 var databaseSecret = {
   name: 'database-url'
   keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/database-url'
@@ -29,6 +32,11 @@ var databaseSecret = {
 var fmpSecret = {
   name: 'fmp-api-key'
   keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/fmp-api-key'
+  identity: identityId
+}
+var marketDataOptionsSecret = {
+  name: 'marketdata-api-key'
+  keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/marketdata-api-key'
   identity: identityId
 }
 
@@ -61,6 +69,9 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
       secrets: [
         databaseSecret
         fmpSecret
+        ...includeMarketDataOptionsSecret ? [
+          marketDataOptionsSecret
+        ] : []
       ]
     }
     template: {
@@ -123,6 +134,20 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
               name: 'PHASE2_OPTIONS_CONCURRENCY'
               value: '2'
             }
+            ...includeMarketDataOptionsSecret ? [
+              {
+                name: 'MARKETDATA_OPTIONS_API_KEY'
+                secretRef: 'marketdata-api-key'
+              }
+              {
+                name: 'MARKETDATA_OPTIONS_DTE'
+                value: '30'
+              }
+              {
+                name: 'MARKETDATA_OPTIONS_STRIKE_LIMIT'
+                value: '8'
+              }
+            ] : []
             {
               name: 'FMP_POSITIONS_SUMMARY_ENABLED'
               value: 'false'

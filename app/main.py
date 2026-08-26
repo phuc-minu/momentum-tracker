@@ -39,6 +39,9 @@ def health():
         "status": "ok",
         "marketdata_configured": bool(os.getenv("FMP_API_KEY")),
         "provider": "fmp",
+        "options_provider": "marketdata.app"
+        if (os.getenv("MARKETDATA_OPTIONS_API_KEY") or os.getenv("MARKETDATA_TOKEN") or os.getenv("MARKETDATA_API_KEY"))
+        else ("fmp" if os.getenv("FMP_OPTIONS_CHAIN_PATH") or os.getenv("FMP_POSITIONS_SUMMARY_ENABLED", "").lower() in {"1", "true", "yes", "on"} else None),
         "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
     }
 
