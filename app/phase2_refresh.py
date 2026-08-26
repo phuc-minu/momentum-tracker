@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import logging
 import os
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
@@ -25,6 +26,8 @@ from phase2_pipeline import phase2_symbol
 from schemas import Candle
 from symbol_source import load_phase2_symbols
 from universe import configured_universe
+
+LOGGER = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -200,10 +203,19 @@ async def _filter_symbols_by_price_movement(
     countback = max(volume_days, movement_days + 10, 40)
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 
-    async def price_movement(item: dict[str, Any]) -> tuple[dict[str, Any], float] | None:
+    async def fetch(item: dict[str, Any]) -> tuple[dict[str, Any], list[Candle]]:
         symbol = item["symbol"]
         async with semaphore:
             candles = await _fetch_symbol_candles_with_retry(client, symbol, countback=countback)
+        return item, candles
+
+    rows = await asyncio.gather(*(fetch(item) for item in symbols))
+    candle_map = {item["symbol"]: candles for item, candles in rows if candles}
+    _apply_prefilter_stored_candle_fallback(candle_map, [item["symbol"] for item in symbols], countback=countback)
+
+    def price_movement(item: dict[str, Any]) -> tuple[dict[str, Any], float] | None:
+        symbol = item["symbol"]
+        candles = candle_map.get(symbol, [])
         if not candles:
             return None
         if candles[-1].close <= min_price:
@@ -215,10 +227,50 @@ async def _filter_symbols_by_price_movement(
             return None
         return item, return_value
 
-    rows = await asyncio.gather(*(price_movement(item) for item in symbols))
-    movers = [row for row in rows if row is not None]
+    movers = [row for row in (price_movement(item) for item in symbols) if row is not None]
     movers.sort(key=lambda row: (-row[1], row[0]["symbol"]))
     return [item for item, _return_value in movers[:limit]]
+
+
+def _apply_prefilter_stored_candle_fallback(
+    candle_map: dict[str, list[Candle]],
+    symbols: list[str],
+    *,
+    countback: int,
+) -> None:
+    reference_date = _latest_candle_date(candle_map)
+    stale_or_missing = []
+    for symbol in symbols:
+        candles = candle_map.get(symbol)
+        if not candles:
+            stale_or_missing.append(symbol)
+            continue
+        if reference_date is not None and _candle_date(candles[-1]) < reference_date:
+            stale_or_missing.append(symbol)
+
+    if not stale_or_missing:
+        return
+
+    try:
+        with connect() as connection:
+            stored_rows = fetch_recent_daily_bars(connection, stale_or_missing, countback=countback)
+    except Exception as error:
+        LOGGER.warning("Stored prefilter candle fallback unavailable: %s", error)
+        return
+
+    stored_map = _stored_rows_to_candle_map(stored_rows)
+    replaced = 0
+    for symbol in stale_or_missing:
+        stored_candles = stored_map.get(symbol, [])
+        if len(stored_candles) < countback:
+            continue
+        if reference_date is not None and _candle_date(stored_candles[-1]) < reference_date:
+            continue
+        candle_map[symbol] = stored_candles[-countback:]
+        replaced += 1
+
+    if replaced:
+        LOGGER.info("Used stored prefilter candle fallback for %s symbols", replaced)
 
 
 async def _fetch_candles(

@@ -413,6 +413,53 @@ def test_phase2_prefilter_keeps_top_price_movers(monkeypatch):
     assert [item["symbol"] for item in symbols] == ["MRNA", "NVDA"]
 
 
+def test_phase2_prefilter_uses_stored_bars_for_provider_misses(monkeypatch):
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.api_key = "test-token"
+
+        async def candles(self, symbol, countback=40):
+            if symbol == "PURR":
+                raise MarketDataError("temporary provider miss")
+            multipliers = {"NVDA": 1.3, "AAPL": 1.1}
+            candles = _with_calendar_day_move(demo_candles(symbol, countback), 30, multipliers[symbol])
+            return _with_volume(candles, 4_000_000)
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_fetch_recent_daily_bars(connection, symbols, *, countback):
+        assert symbols == ["PURR"]
+        assert countback == 40
+        candles = _with_volume(
+            _with_calendar_day_move(demo_candles("PURR", countback), 30, 1.9),
+            4_000_000,
+        )
+        return _daily_bar_rows("PURR", candles)
+
+    monkeypatch.setattr("phase2_refresh.MarketDataClient", FakeClient)
+    monkeypatch.setattr("phase2_refresh.connect", lambda: FakeConnection())
+    monkeypatch.setattr("phase2_refresh.fetch_recent_daily_bars", fake_fetch_recent_daily_bars)
+
+    symbols = asyncio.run(
+        _filter_symbols_by_price_movement(
+            [{"symbol": "AAPL"}, {"symbol": "PURR"}, {"symbol": "NVDA"}],
+            min_average_volume=3_000_000,
+            min_price=10,
+            volume_days=20,
+            movement_days=30,
+            limit=2,
+            concurrency=2,
+        )
+    )
+
+    assert [item["symbol"] for item in symbols] == ["PURR", "NVDA"]
+
+
 def test_phase2_fetch_recent_daily_bars_reads_latest_rows():
     class FakeCursor:
         query = ""
