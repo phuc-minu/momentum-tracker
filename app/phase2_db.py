@@ -35,6 +35,16 @@ create table if not exists refresh_runs (
   error text
 );
 
+create table if not exists refresh_logs (
+  id bigserial primary key,
+  run_id bigint references refresh_runs(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  level text not null,
+  source text not null,
+  message text not null,
+  details jsonb not null default '{}'::jsonb
+);
+
 create table if not exists momentum_scores (
   symbol text primary key references symbols(symbol) on delete cascade,
   run_id bigint references refresh_runs(id) on delete set null,
@@ -65,6 +75,7 @@ create table if not exists option_scores (
 create index if not exists idx_daily_bars_symbol_date on daily_bars(symbol, bar_date desc);
 create index if not exists idx_momentum_scores_score on momentum_scores(score desc);
 create index if not exists idx_option_scores_score on option_scores(options_confirmation_score desc nulls last);
+create index if not exists idx_refresh_logs_run_created on refresh_logs(run_id, created_at desc);
 """
 
 
@@ -121,6 +132,26 @@ def finish_refresh_run(connection, run_id: int, *, status: str, symbols_scored: 
             where id = %s
             """,
             (status, symbols_scored, error, run_id),
+        )
+    connection.commit()
+
+
+def insert_refresh_log(
+    connection,
+    run_id: int,
+    *,
+    level: str,
+    source: str,
+    message: str,
+    details: str = "{}",
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            insert into refresh_logs (run_id, level, source, message, details)
+            values (%s, %s, %s, %s, %s::jsonb)
+            """,
+            (run_id, level, source, message, details),
         )
     connection.commit()
 
@@ -358,4 +389,31 @@ def fetch_latest_refresh_run(connection) -> dict[str, Any] | None:
             limit 1
             """
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    refresh_run = dict(row)
+    refresh_run["logs"] = fetch_refresh_logs(connection, int(refresh_run["id"]))
+    return refresh_run
+
+
+def fetch_refresh_logs(connection, run_id: int, *, limit: int = 20) -> list[dict[str, Any]]:
+    if not _table_exists(connection, "refresh_logs"):
+        return []
+    with connection.cursor() as cursor:
+        rows = cursor.execute(
+            """
+            select id, run_id, created_at, level, source, message, details
+            from refresh_logs
+            where run_id = %s
+            order by created_at desc
+            limit %s
+            """,
+            (run_id, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _table_exists(connection, table_name: str) -> bool:
+    with connection.cursor() as cursor:
+        row = cursor.execute("select to_regclass(%s) as table_name", (f"public.{table_name}",)).fetchone()
+    return bool(row and row["table_name"])

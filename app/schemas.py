@@ -144,6 +144,16 @@ class Phase2CandidateResponse(BaseModel):
     results: list[Phase2Candidate]
 
 
+class Phase2RefreshLog(BaseModel):
+    id: int
+    run_id: int
+    created_at: str
+    level: str
+    source: str
+    message: str
+    details: dict = Field(default_factory=dict)
+
+
 class Phase2RefreshStatus(BaseModel):
     id: int
     started_at: str
@@ -152,3 +162,4 @@ class Phase2RefreshStatus(BaseModel):
     symbols_requested: int
     symbols_scored: int
     error: str | None = None
+    logs: list[Phase2RefreshLog] = Field(default_factory=list)

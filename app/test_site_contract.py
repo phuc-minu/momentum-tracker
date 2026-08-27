@@ -24,7 +24,7 @@ def test_dashboard_shell_and_static_assets_are_served_with_no_cache_headers():
     assert 'id="loginScreen"' in html
     assert 'id="dashboard"' in html
     assert "PostgreSQL Momentum Candidates" in html
-    assert "Put/Call" in html
+    assert "Put/Call 10D" in html
     assert "Pullback Watch" in html
     assert "Biotech Catalysts" in html
     assert "Future Event Tracker" in html

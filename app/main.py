@@ -250,9 +250,21 @@ async def run_scan(request: ScanRequest) -> ScanResponse:
 
 def _serialize_phase2_row(row):
     return {
-        key: value.isoformat() if hasattr(value, "isoformat") else float(value) if _is_decimal(value) else value
+        key: _serialize_phase2_value(value)
         for key, value in row.items()
     }
+
+
+def _serialize_phase2_value(value):
+    if isinstance(value, list):
+        return [_serialize_phase2_row(item) if isinstance(item, dict) else _serialize_phase2_value(item) for item in value]
+    if isinstance(value, dict):
+        return _serialize_phase2_row(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if _is_decimal(value):
+        return float(value)
+    return value
 
 
 def _is_decimal(value) -> bool:

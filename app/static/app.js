@@ -304,6 +304,12 @@ function renderPhase2Discovery(payload) {
   const status = payload.refresh_status;
   const statusText = status?.finished_at ? ` refreshed ${formatDateTime(status.finished_at)}` : "";
   elements.discoverMeta.textContent = `${candidates.length} candidates, PostgreSQL${statusText}`;
+  const warning = latestRefreshWarning(status);
+  if (warning) {
+    renderModeNotice(warning.message);
+  } else {
+    renderModeNotice();
+  }
   if (!candidates.length) {
     renderDiscoveryEmpty("No Phase 2 candidates matched this filter");
     return;
@@ -698,6 +704,11 @@ function requireAuthenticated(response, payload) {
   if (response.status !== 401) return;
   showLogin(payload.detail === "Login required" ? "Session expired. Log in again." : payload.detail || "Login required");
   throw new AuthRequiredError("Login required");
+}
+
+function latestRefreshWarning(status) {
+  if (!status?.logs?.length) return null;
+  return status.logs.find((log) => log.level === "warning") || null;
 }
 
 function renderModeNotice(message) {

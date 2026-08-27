@@ -14,6 +14,7 @@ from phase2_db import (
     create_refresh_run,
     fetch_recent_daily_bars,
     finish_refresh_run,
+    insert_refresh_log,
     init_db,
     prune_scores_for_run,
     upsert_daily_bars,
@@ -28,6 +29,7 @@ from symbol_source import load_phase2_symbols
 from universe import configured_universe
 
 LOGGER = logging.getLogger(__name__)
+MIN_EXPECTED_SCREENER_SYMBOLS = 50
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +55,7 @@ async def main() -> None:
     if not args.demo and args.source != "fmp":
         raise SystemExit("Live Phase 2 refresh must use PHASE2_SYMBOL_SOURCE=fmp")
     symbols = _load_symbols(args)
+    pending_logs = _screener_warning_logs(args, symbols)
     if not symbols:
         raise SystemExit("No symbols configured. Set PHASE2_SYMBOLS or use --source listed.")
     if not args.demo and args.min_average_volume > 0:
@@ -75,6 +78,8 @@ async def main() -> None:
         init_db(connection)
         upsert_symbols(connection, symbols)
         run_id = create_refresh_run(connection, symbols_requested=len(symbols))
+        for log in pending_logs:
+            insert_refresh_log(connection, run_id, **log)
 
         try:
             candle_map = await _fetch_candles(
@@ -152,6 +157,34 @@ def _load_symbols(args: argparse.Namespace) -> list[dict[str, Any]]:
             if not args.benchmark.strip().upper() or symbol != args.benchmark.strip().upper()
         ][: args.symbol_limit]
     return load_phase2_symbols(source=args.source, limit=args.symbol_limit)
+
+
+def _screener_warning_logs(args: argparse.Namespace, symbols: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if args.demo or args.source != "fmp" or len(symbols) >= MIN_EXPECTED_SCREENER_SYMBOLS:
+        return []
+    message = (
+        "FMP company-screener returned fewer than "
+        f"{MIN_EXPECTED_SCREENER_SYMBOLS} usable symbols: {len(symbols)}."
+    )
+    LOGGER.warning(message)
+    return [
+        {
+            "level": "warning",
+            "source": "fmp.company-screener",
+            "message": message,
+            "details": json.dumps(
+                {
+                    "symbols_returned": len(symbols),
+                    "minimum_expected": MIN_EXPECTED_SCREENER_SYMBOLS,
+                    "symbol_limit": args.symbol_limit,
+                    "min_average_volume": args.min_average_volume,
+                    "min_price": args.min_price,
+                    "country": os.getenv("FMP_SCREENER_COUNTRY", "US"),
+                },
+                separators=(",", ":"),
+            ),
+        }
+    ]
 
 
 async def _filter_symbols_by_average_volume(

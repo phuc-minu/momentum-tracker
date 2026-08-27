@@ -159,6 +159,7 @@ Azure PostgreSQL access:
 - Git may warn about denied access to `C:\Users\phuct\.config\git\ignore`; this warning has not blocked commits or pushes.
 - `gh` CLI was not installed as of August 16, 2026. Use normal `git` for commit/push unless GitHub PR automation is specifically needed.
 - FMP is the live price/history/discovery provider. Use `FMP_API_KEY` with base URL `https://financialmodelingprep.com/stable/`. MarketData.app may be used only for options enrichment through `MARKETDATA_OPTIONS_API_KEY`; put/call ratio is 10-DTE option-chain volume only. Live Discovery and Phase 2 refresh default to FMP `company-screener` for symbol selection.
+- FMP stable `quote` endpoint must be treated as single-symbol only. `/stable/quote?symbol=NVDA` works, but comma-batched requests such as `/stable/quote?symbol=NVDA,XOM` have returned HTTP 200 with an empty array. Use one request per symbol unless FMP support confirms a documented bulk quote endpoint.
 - The frontend now falls back to beta/demo data when live FMP scanner or discovery requests fail.
 - The dashboard and token-spending endpoints require login. `/health` and static assets remain public.
 - Phase 2 deliberately keeps broad market scans out of the user click path. Use scheduled refreshes and conservative symbol limits to control FMP usage.

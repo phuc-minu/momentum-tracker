@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -15,8 +16,9 @@ from phase2_refresh import (
     _filter_symbols_by_price_movement,
     _option_activity_to_db,
     _select_top_price_mover_symbols,
+    _screener_warning_logs,
 )
-from phase2_db import fetch_phase2_candidates, fetch_recent_daily_bars, prune_scores_for_run
+from phase2_db import fetch_latest_refresh_run, fetch_phase2_candidates, fetch_recent_daily_bars, insert_refresh_log, prune_scores_for_run
 from phase2_pipeline import score_market_candidates
 from schemas import Candle, DiscoveryCandidate, MomentumFactors
 from symbol_source import configured_phase2_symbols, load_phase2_symbols
@@ -357,6 +359,37 @@ def test_phase2_fmp_source_uses_screener(monkeypatch):
     assert "apikey=test-token" in captured["url"]
 
 
+def test_phase2_warns_when_fmp_screener_returns_fewer_than_50_symbols(monkeypatch):
+    monkeypatch.setenv("FMP_SCREENER_COUNTRY", "US")
+    args = SimpleNamespace(
+        demo=False,
+        source="fmp",
+        symbol_limit=500,
+        min_average_volume=3_000_000,
+        min_price=10,
+    )
+
+    logs = _screener_warning_logs(args, [{"symbol": f"SYM{index}"} for index in range(44)])
+
+    assert len(logs) == 1
+    assert logs[0]["level"] == "warning"
+    assert logs[0]["source"] == "fmp.company-screener"
+    assert "fewer than 50" in logs[0]["message"]
+    assert '"symbols_returned":44' in logs[0]["details"]
+
+
+def test_phase2_does_not_warn_when_fmp_screener_returns_at_least_50_symbols():
+    args = SimpleNamespace(
+        demo=False,
+        source="fmp",
+        symbol_limit=500,
+        min_average_volume=3_000_000,
+        min_price=10,
+    )
+
+    assert _screener_warning_logs(args, [{"symbol": f"SYM{index}"} for index in range(50)]) == []
+
+
 def test_phase2_prefilter_uses_average_daily_volume(monkeypatch):
     class FakeClient:
         def __init__(self, *args, **kwargs):
@@ -677,6 +710,84 @@ def test_phase2_refresh_prunes_stale_scores():
     assert "delete from momentum_scores where run_id is distinct from %s" in connection.cursor_instance.queries[1][0]
     assert connection.cursor_instance.queries[0][1] == (7,)
     assert connection.cursor_instance.queries[1][1] == (7,)
+
+
+def test_phase2_refresh_logs_are_inserted_and_returned_with_latest_run():
+    class FakeCursor:
+        def __init__(self):
+            self.queries = []
+            self.fetchone_count = 0
+
+        def execute(self, query, params=None):
+            self.queries.append((query, params))
+            return self
+
+        def fetchone(self):
+            self.fetchone_count += 1
+            if self.fetchone_count == 2:
+                return {"table_name": "refresh_logs"}
+            return {
+                "id": 7,
+                "started_at": datetime(2026, 8, 26, tzinfo=UTC),
+                "finished_at": datetime(2026, 8, 26, 22, 30, tzinfo=UTC),
+                "status": "succeeded",
+                "symbols_requested": 44,
+                "symbols_scored": 40,
+                "error": None,
+            }
+
+        def fetchall(self):
+            return [
+                {
+                    "id": 11,
+                    "run_id": 7,
+                    "created_at": datetime(2026, 8, 26, 22, 29, tzinfo=UTC),
+                    "level": "warning",
+                    "source": "fmp.company-screener",
+                    "message": "FMP company-screener returned fewer than 50 usable symbols: 44.",
+                    "details": {"symbols_returned": 44},
+                }
+            ]
+
+    class FakeConnection:
+        cursor_instance = FakeCursor()
+        committed = False
+
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self.cursor_instance
+
+        def __exit__(self, *args):
+            return False
+
+        def commit(self):
+            self.committed = True
+
+    connection = FakeConnection()
+
+    insert_refresh_log(
+        connection,
+        7,
+        level="warning",
+        source="fmp.company-screener",
+        message="FMP company-screener returned fewer than 50 usable symbols: 44.",
+        details='{"symbols_returned":44}',
+    )
+    latest = fetch_latest_refresh_run(connection)
+
+    assert connection.committed is True
+    assert "insert into refresh_logs" in connection.cursor_instance.queries[0][0]
+    assert connection.cursor_instance.queries[0][1] == (
+        7,
+        "warning",
+        "fmp.company-screener",
+        "FMP company-screener returned fewer than 50 usable symbols: 44.",
+        '{"symbols_returned":44}',
+    )
+    assert latest["logs"][0]["source"] == "fmp.company-screener"
+    assert latest["logs"][0]["details"] == {"symbols_returned": 44}
 
 
 def test_phase2_option_activity_serializes_for_db():
