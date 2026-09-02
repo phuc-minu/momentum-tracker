@@ -259,7 +259,11 @@ function setButtonLoading(button, isLoading, label = "Loading") {
 
 async function runPhase2Discovery() {
   const limit = Number(elements.limitInput.value);
-  const response = await fetch("/phase2/candidates?limit=200", { credentials: "same-origin" });
+  const params = new URLSearchParams({
+    limit: "200",
+    exclude_earnings: elements.excludeEarningsToggle.checked ? "true" : "false",
+  });
+  const response = await fetch(`/phase2/candidates?${params.toString()}`, { credentials: "same-origin" });
   const payload = await readJsonResponse(response);
   requireAuthenticated(response, payload);
   if (!response.ok) throw new Error(payload.detail || "Phase 2 candidates unavailable");
@@ -461,7 +465,10 @@ function phase2ToDiscoveryRow(item, periodDays) {
     put_call_source: item.put_call_source || "unavailable",
     options_confirmation_score: item.options_confirmation_score,
     options_signal: item.options_signal || "Options unavailable",
-    catalyst: "PostgreSQL refresh",
+    earnings_checked: Boolean(factors.earnings_checked),
+    earnings_near_move: Boolean(factors.earnings_near_move),
+    likely_earnings_related: Boolean(factors.likely_earnings_related),
+    catalyst: factors.likely_earnings_related ? "likely earnings-related" : "PostgreSQL refresh",
   };
 }
 

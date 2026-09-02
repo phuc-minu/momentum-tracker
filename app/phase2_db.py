@@ -341,7 +341,7 @@ def prune_scores_for_run(connection, run_id: int) -> None:
     connection.commit()
 
 
-def fetch_phase2_candidates(connection, *, limit: int, min_price: float = 10.0) -> list[dict[str, Any]]:
+def fetch_phase2_candidates(connection, *, limit: int, min_price: float = 10.0, exclude_earnings: bool = False) -> list[dict[str, Any]]:
     with connection.cursor() as cursor:
         rows = cursor.execute(
             """
@@ -371,10 +371,14 @@ def fetch_phase2_candidates(connection, *, limit: int, min_price: float = 10.0) 
             left join option_scores o on o.symbol = m.symbol
             where s.active = true
               and m.last_close > %s
+              and (
+                not %s
+                or coalesce((m.factors->>'likely_earnings_related')::boolean, false) = false
+              )
             order by m.score desc, (m.factors->>'return_1m')::numeric desc nulls last
             limit %s
             """,
-            (min_price, limit),
+            (min_price, exclude_earnings, limit),
         ).fetchall()
     return [dict(row) for row in rows]
 

@@ -134,11 +134,23 @@ async def main() -> None:
                 demo=args.demo,
                 concurrency=args.options_concurrency,
             )
+            earnings_metadata = await _score_earnings(
+                symbols=[score.symbol for score in scores],
+                candle_map=candle_map,
+                demo=args.demo,
+                concurrency=args.options_concurrency,
+            )
             scores = _apply_options_score_adjustments(scores, option_scores)
             upsert_momentum_scores(
                 connection,
                 run_id,
-                [momentum_signal_to_db(score) for score in scores],
+                [
+                    _momentum_signal_to_db_with_metadata(
+                        score,
+                        earnings_metadata.get(score.symbol, _default_earnings_metadata()),
+                    )
+                    for score in scores
+                ],
             )
             upsert_option_scores(connection, run_id, option_scores)
             prune_scores_for_run(connection, run_id)
@@ -509,6 +521,89 @@ def _apply_options_score_adjustments(scores, option_scores: list[dict[str, Any]]
         adjusted.append(score.model_copy(update={"score": adjusted_score, "grade": grade_for_score(adjusted_score)}))
     adjusted.sort(key=lambda item: (item.score, item.factors.return_1m if item.factors.return_1m is not None else -999), reverse=True)
     return adjusted
+
+
+async def _score_earnings(
+    *,
+    symbols: list[str],
+    candle_map: dict[str, list[Candle]],
+    demo: bool,
+    concurrency: int,
+) -> dict[str, dict[str, Any]]:
+    if demo:
+        return {symbol: _default_earnings_metadata(checked=True) for symbol in symbols}
+
+    client = MarketDataClient(timeout_seconds=30.0)
+    if not client.api_key:
+        return {symbol: _default_earnings_metadata() for symbol in symbols}
+
+    semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
+
+    async def score(symbol: str) -> tuple[str, dict[str, Any]]:
+        async with semaphore:
+            try:
+                earnings = await client.earnings(symbol, countback=4)
+            except MarketDataError:
+                return symbol, _default_earnings_metadata()
+        return symbol, _earnings_metadata_for_symbol(earnings, candle_map.get(symbol, []))
+
+    rows = await asyncio.gather(*(score(symbol) for symbol in symbols))
+    return dict(rows)
+
+
+def _default_earnings_metadata(*, checked: bool = False) -> dict[str, Any]:
+    return {
+        "earnings_checked": checked,
+        "earnings_near_move": False,
+        "likely_earnings_related": False,
+        "earnings_date": None,
+    }
+
+
+def _earnings_metadata_for_symbol(earnings: list[dict], candles: list[Candle]) -> dict[str, Any]:
+    metadata = _default_earnings_metadata(checked=True)
+    if len(candles) < 2:
+        return metadata
+
+    window_end = _candle_date(candles[-1])
+    window_start = window_end - timedelta(days=30)
+    for row in earnings:
+        report_date = _earnings_report_date(row)
+        if report_date is None:
+            continue
+        if window_start <= report_date <= window_end:
+            metadata["earnings_near_move"] = True
+            metadata["likely_earnings_related"] = True
+            metadata["earnings_date"] = report_date.isoformat()
+            break
+    return metadata
+
+
+def _earnings_report_date(row: dict):
+    raw_date = row.get("date") or row.get("reportDate") or row.get("updated")
+    if raw_date is None:
+        return None
+    try:
+        if isinstance(raw_date, (int, float)):
+            return datetime.fromtimestamp(raw_date, UTC).date()
+        return datetime.fromisoformat(str(raw_date).replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _momentum_signal_to_db_with_metadata(signal, earnings_metadata: dict[str, Any]) -> dict[str, Any]:
+    row = momentum_signal_to_db(signal)
+    notes = list(signal.notes)
+    if earnings_metadata.get("likely_earnings_related"):
+        date_text = earnings_metadata.get("earnings_date")
+        suffix = f" on {date_text}" if date_text else ""
+        notes.append(f"Likely earnings-related move{suffix}.")
+    row["notes"] = json.dumps(notes, separators=(",", ":"))
+
+    factors = signal.factors.model_dump(mode="json")
+    factors.update(earnings_metadata)
+    row["factors"] = json.dumps(factors, separators=(",", ":"))
+    return row
 
 
 def _option_activity_to_db(symbol: str, activity: dict[str, Any]) -> dict[str, Any]:

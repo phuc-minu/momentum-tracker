@@ -12,8 +12,10 @@ from options_activity import analyze_options_activity
 from phase2_refresh import (
     _apply_stored_candle_fallback,
     _calendar_day_return,
+    _earnings_metadata_for_symbol,
     _filter_symbols_by_average_volume,
     _filter_symbols_by_price_movement,
+    _momentum_signal_to_db_with_metadata,
     _option_activity_to_db,
     _select_top_price_mover_symbols,
     _screener_warning_logs,
@@ -615,6 +617,35 @@ def test_phase2_scores_market_candidates():
     assert scores[0].score >= scores[1].score
 
 
+def test_phase2_earnings_metadata_marks_recent_report():
+    candles = demo_candles("CRM", 60)
+    report_date = datetime.fromtimestamp(candles[-1].timestamp, UTC).date().isoformat()
+
+    metadata = _earnings_metadata_for_symbol([{"date": report_date}], candles)
+
+    assert metadata["earnings_checked"] is True
+    assert metadata["earnings_near_move"] is True
+    assert metadata["likely_earnings_related"] is True
+    assert metadata["earnings_date"] == report_date
+
+
+def test_phase2_momentum_db_payload_includes_earnings_metadata():
+    signal = score_symbol("CRM", demo_candles("CRM", 60), [])
+
+    row = _momentum_signal_to_db_with_metadata(
+        signal,
+        {
+            "earnings_checked": True,
+            "earnings_near_move": True,
+            "likely_earnings_related": True,
+            "earnings_date": "2026-08-26",
+        },
+    )
+
+    assert '"likely_earnings_related":true' in row["factors"]
+    assert "Likely earnings-related move on 2026-08-26." in row["notes"]
+
+
 def test_phase2_scores_filter_low_average_daily_volume():
     benchmark = demo_candles("BENCH", 260)
     candle_map = {
@@ -646,9 +677,11 @@ def test_phase2_candidates_requires_database_url(monkeypatch):
 def test_phase2_candidates_sort_by_score_then_growth():
     class FakeCursor:
         query = ""
+        params = None
 
         def execute(self, query, params=None):
             self.query = query
+            self.params = params
             return self
 
         def fetchall(self):
@@ -672,9 +705,43 @@ def test_phase2_candidates_sort_by_score_then_growth():
 
     assert "order by m.score desc, (m.factors->>'return_1m')::numeric desc nulls last" in connection.cursor_instance.query
     assert "and m.last_close > %s" in connection.cursor_instance.query
+    assert "m.factors->>'likely_earnings_related'" in connection.cursor_instance.query
+    assert connection.cursor_instance.params == (10.0, False, 10)
     assert "o.put_call_source" in connection.cursor_instance.query
     assert "o.call_volume" in connection.cursor_instance.query
     assert "o.call_activity_ratio" in connection.cursor_instance.query
+
+
+def test_phase2_candidates_can_exclude_earnings_related_rows():
+    class FakeCursor:
+        query = ""
+        params = None
+
+        def execute(self, query, params=None):
+            self.query = query
+            self.params = params
+            return self
+
+        def fetchall(self):
+            return []
+
+    class FakeConnection:
+        cursor_instance = FakeCursor()
+
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self.cursor_instance
+
+        def __exit__(self, *args):
+            return False
+
+    connection = FakeConnection()
+
+    fetch_phase2_candidates(connection, limit=25, min_price=12.5, exclude_earnings=True)
+
+    assert connection.cursor_instance.params == (12.5, True, 25)
 
 
 def test_phase2_refresh_prunes_stale_scores():
