@@ -15,6 +15,7 @@ from phase2_refresh import (
     _earnings_metadata_for_symbol,
     _filter_symbols_by_average_volume,
     _filter_symbols_by_price_movement,
+    _load_symbols,
     _momentum_signal_to_db_with_metadata,
     _option_activity_to_db,
     _select_top_price_mover_symbols,
@@ -356,9 +357,44 @@ def test_phase2_fmp_source_uses_screener(monkeypatch):
 
     assert [item["symbol"] for item in symbols] == ["MRVL", "BRK.B"]
     assert symbols[0]["exchange"] == "NASDAQ"
-    assert "volumeMoreThan=3000000" in captured["url"]
+    assert "avgVolumeMoreThan=3000000" in captured["url"]
     assert "priceMoreThan=10" in captured["url"]
     assert "apikey=test-token" in captured["url"]
+
+
+def test_phase2_refresh_load_symbols_passes_screener_thresholds(monkeypatch):
+    captured = {}
+
+    def fake_load_phase2_symbols(*, source, limit, min_average_volume=None, min_price=None):
+        captured.update(
+            {
+                "source": source,
+                "limit": limit,
+                "min_average_volume": min_average_volume,
+                "min_price": min_price,
+            }
+        )
+        return [{"symbol": "MRVL", "exchange": "NASDAQ"}]
+
+    args = SimpleNamespace(
+        demo=False,
+        source="fmp",
+        benchmark="",
+        symbol_limit=75,
+        min_average_volume=1_500_000,
+        min_price=5.0,
+    )
+    monkeypatch.setattr("phase2_refresh.load_phase2_symbols", fake_load_phase2_symbols)
+
+    symbols = _load_symbols(args)
+
+    assert symbols == [{"symbol": "MRVL", "exchange": "NASDAQ"}]
+    assert captured == {
+        "source": "fmp",
+        "limit": 75,
+        "min_average_volume": 1_500_000,
+        "min_price": 5.0,
+    }
 
 
 def test_phase2_warns_when_fmp_screener_returns_fewer_than_50_symbols(monkeypatch):

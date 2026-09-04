@@ -168,7 +168,12 @@ def _load_symbols(args: argparse.Namespace) -> list[dict[str, Any]]:
             for symbol in configured_universe()
             if not args.benchmark.strip().upper() or symbol != args.benchmark.strip().upper()
         ][: args.symbol_limit]
-    return load_phase2_symbols(source=args.source, limit=args.symbol_limit)
+    return load_phase2_symbols(
+        source=args.source,
+        limit=args.symbol_limit,
+        min_average_volume=args.min_average_volume,
+        min_price=args.min_price,
+    )
 
 
 def _screener_warning_logs(args: argparse.Namespace, symbols: list[dict[str, Any]]) -> list[dict[str, Any]]:

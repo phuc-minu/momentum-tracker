@@ -18,13 +18,23 @@ def configured_phase2_symbols() -> list[dict]:
     return [phase2_symbol(symbol, exchange="configured") for symbol in symbols]
 
 
-def load_phase2_symbols(*, source: str = "configured", limit: int = 500) -> list[dict]:
+def load_phase2_symbols(
+    *,
+    source: str = "configured",
+    limit: int = 500,
+    min_average_volume: int | None = None,
+    min_price: float | None = None,
+) -> list[dict]:
     if source == "configured":
         return configured_phase2_symbols()[:limit]
     if source in {"listed", "nasdaq"}:
         return fetch_listed_symbols(limit=limit)
     if source == "fmp":
-        return fetch_fmp_screener_symbols(limit=limit)
+        return fetch_fmp_screener_symbols(
+            limit=limit,
+            min_average_volume=min_average_volume,
+            min_price=min_price,
+        )
     raise ValueError(f"Unsupported PHASE2_SYMBOL_SOURCE: {source}")
 
 
@@ -38,7 +48,7 @@ def fetch_fmp_screener_symbols(
     if not api_key:
         raise RuntimeError("FMP_API_KEY is required for PHASE2_SYMBOL_SOURCE=fmp")
     params = {
-        "volumeMoreThan": str(min_average_volume or os.getenv("PHASE2_MIN_AVERAGE_VOLUME", "3000000")),
+        "avgVolumeMoreThan": str(min_average_volume or os.getenv("PHASE2_MIN_AVERAGE_VOLUME", "3000000")),
         "priceMoreThan": f"{min_price:g}" if min_price is not None else os.getenv("PHASE2_MIN_PRICE", "10"),
         "isActivelyTrading": "true",
         "isEtf": "false",
