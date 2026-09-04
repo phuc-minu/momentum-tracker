@@ -31,9 +31,10 @@ def test_dashboard_shell_and_static_assets_are_served_with_no_cache_headers():
 
     asset_paths = re.findall(r'(?:href|src)="([^"]*/static/[^"]+)"', html)
     assert sorted(asset_paths) == [
-        "/static/app.js?v=202608231220",
-        "/static/styles.css?v=202608231220",
+        f"/static/app.js?v={_expected_static_version()}",
+        f"/static/styles.css?v={_expected_static_version()}",
     ]
+    assert "__STATIC_VERSION__" not in html
     for asset_path in asset_paths:
         asset_response = client.get(asset_path)
         assert asset_response.status_code == 200
@@ -104,3 +105,7 @@ def test_health_endpoint_exposes_site_runtime_status():
     }
     assert response.json()["status"] == "ok"
     assert response.json()["provider"] == "fmp"
+
+
+def _expected_static_version() -> str:
+    return str(max(int((STATIC_DIR / asset).stat().st_mtime) for asset in ("app.js", "styles.css")))

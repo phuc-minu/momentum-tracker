@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -108,7 +108,19 @@ def auth_logout(response: Response):
 
 @app.get("/")
 def root():
-    return FileResponse(STATIC_DIR / "index.html")
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(html.replace("__STATIC_VERSION__", _static_asset_version()))
+
+
+def _static_asset_version() -> str:
+    configured = os.getenv("APP_STATIC_VERSION", "").strip()
+    if configured:
+        return configured
+    mtimes = [
+        int((STATIC_DIR / asset).stat().st_mtime)
+        for asset in ("app.js", "styles.css")
+    ]
+    return str(max(mtimes))
 
 
 @app.get("/universe")
