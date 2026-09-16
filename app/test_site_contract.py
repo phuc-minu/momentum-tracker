@@ -98,7 +98,7 @@ def test_health_endpoint_exposes_site_runtime_status():
     assert response.status_code == 200
     assert response.json().keys() == {
         "status",
-        "marketdata_configured",
+        "fmp_configured",
         "provider",
         "options_provider",
         "openai_configured",

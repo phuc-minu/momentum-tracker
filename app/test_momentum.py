@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from discover import _build_candidate, _live_discovery_universe, _sort_discovery_candidates
 from main import app
-from marketdata import MarketDataCache, MarketDataClient, MarketDataError, demo_candles
+from fmp import FmpCache, FmpClient, FmpError, demo_candles
 from momentum import _score, adjusted_momentum_score, score_symbol
 from options_activity import analyze_options_activity
 from phase2_refresh import (
@@ -19,6 +19,7 @@ from phase2_refresh import (
     _momentum_signal_to_db_with_metadata,
     _option_activity_to_db,
     _select_top_price_mover_symbols,
+    _score_options,
     _screener_warning_logs,
 )
 from phase2_db import fetch_latest_refresh_run, fetch_phase2_candidates, fetch_recent_daily_bars, insert_refresh_log, prune_scores_for_run
@@ -286,11 +287,11 @@ def test_live_scan_skips_symbol_level_fmp_errors(monkeypatch):
 
         async def candles(self, symbol, countback=260):
             if symbol == "AVGO":
-                raise MarketDataError("FMP returned HTTP 402")
+                raise FmpError("FMP returned HTTP 402")
             return demo_candles(symbol, countback)
 
     monkeypatch.setenv("APP_PASSWORD", TEST_PASSWORD)
-    monkeypatch.setattr("main.MarketDataClient", FakeClient)
+    monkeypatch.setattr("main.FmpClient", FakeClient)
     client = TestClient(app)
     login(client)
 
@@ -441,7 +442,7 @@ def test_phase2_prefilter_uses_average_daily_volume(monkeypatch):
                 candles[-1] = candles[-1].model_copy(update={"open": 10, "high": 10, "low": 10, "close": 10})
             return candles
 
-    monkeypatch.setattr("phase2_refresh.MarketDataClient", FakeClient)
+    monkeypatch.setattr("phase2_refresh.FmpClient", FakeClient)
 
     symbols = asyncio.run(
         _filter_symbols_by_average_volume(
@@ -467,7 +468,7 @@ def test_phase2_prefilter_keeps_top_price_movers(monkeypatch):
             volume = 1_000_000 if symbol == "LOWV" else 4_000_000
             return _with_volume(candles, volume)
 
-    monkeypatch.setattr("phase2_refresh.MarketDataClient", FakeClient)
+    monkeypatch.setattr("phase2_refresh.FmpClient", FakeClient)
 
     symbols = asyncio.run(
         _filter_symbols_by_price_movement(
@@ -491,7 +492,7 @@ def test_phase2_prefilter_uses_stored_bars_for_provider_misses(monkeypatch):
 
         async def candles(self, symbol, countback=40):
             if symbol == "PURR":
-                raise MarketDataError("temporary provider miss")
+                raise FmpError("temporary provider miss")
             multipliers = {"NVDA": 1.3, "AAPL": 1.1}
             candles = _with_calendar_day_move(demo_candles(symbol, countback), 30, multipliers[symbol])
             return _with_volume(candles, 4_000_000)
@@ -512,7 +513,7 @@ def test_phase2_prefilter_uses_stored_bars_for_provider_misses(monkeypatch):
         )
         return _daily_bar_rows("PURR", candles)
 
-    monkeypatch.setattr("phase2_refresh.MarketDataClient", FakeClient)
+    monkeypatch.setattr("phase2_refresh.FmpClient", FakeClient)
     monkeypatch.setattr("phase2_refresh.connect", lambda: FakeConnection())
     monkeypatch.setattr("phase2_refresh.fetch_recent_daily_bars", fake_fetch_recent_daily_bars)
 
@@ -1012,8 +1013,8 @@ def _daily_bar_rows(symbol: str, candles: list[Candle]) -> list[dict]:
     ]
 
 
-def test_marketdata_cache_round_trips_payload(tmp_path):
-    cache = MarketDataCache(tmp_path)
+def test_fmp_cache_round_trips_payload(tmp_path):
+    cache = FmpCache(tmp_path)
 
     cache.set("stocks:candles:AAPL", {"s": "ok", "c": [100.0]})
 
@@ -1022,7 +1023,7 @@ def test_marketdata_cache_round_trips_payload(tmp_path):
 
 def test_bulk_candles_uses_fmp_quote_batches(monkeypatch):
     captured = {}
-    client = MarketDataClient(api_key="test-token")
+    client = FmpClient(api_key="test-token")
 
     async def fake_get(url, params, *, cache_ttl_seconds=300):
         captured["url"] = url
@@ -1042,7 +1043,7 @@ def test_bulk_candles_uses_fmp_quote_batches(monkeypatch):
 
 def test_historical_bulk_candles_uses_fmp_eod_date(monkeypatch):
     captured = {}
-    client = MarketDataClient(api_key="test-token")
+    client = FmpClient(api_key="test-token")
 
     async def fake_get(url, params, *, cache_ttl_seconds=300):
         captured["url"] = url
@@ -1062,68 +1063,44 @@ def test_historical_bulk_candles_uses_fmp_eod_date(monkeypatch):
 
 def test_option_chain_returns_empty_without_options_provider(monkeypatch):
     monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
-    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_TOKEN", raising=False)
-    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
-    client = MarketDataClient(api_key="test-token")
+    client = FmpClient(api_key="test-token")
 
     assert asyncio.run(client.option_chain("MSFT")) == []
+    assert client.options_configured is False
 
 
-def test_marketdata_env_var_is_used_for_options_only(monkeypatch):
-    monkeypatch.setenv("MARKETDATA_API_KEY", "old-provider-token")
-    monkeypatch.setenv("MARKETDATA_OPTIONS_API_KEY", "old-options-token")
+def test_phase2_score_options_returns_unavailable_without_fmp_options(monkeypatch):
+    class FakeClient:
+        options_configured = False
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("phase2_refresh.FmpClient", FakeClient)
+
+    rows = asyncio.run(_score_options(symbols=["AAPL", "MSFT"], run_id=1, demo=False, concurrency=2))
+
+    assert [row["symbol"] for row in rows] == ["AAPL", "MSFT"]
+    assert {row["options_signal"] for row in rows} == {"Options unavailable"}
+    assert {row["call_activity"] for row in rows} == {"unavailable"}
+
+
+def test_fmp_client_requires_fmp_env_vars_for_options(monkeypatch):
     monkeypatch.delenv("FMP_API_KEY", raising=False)
     monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
-    client = MarketDataClient()
+    client = FmpClient()
 
     assert client.api_key is None
-    assert client.marketdata_options_token == "old-options-token"
-
-
-def test_option_chain_normalizes_marketdata_columnar_provider(monkeypatch):
-    monkeypatch.setenv("MARKETDATA_OPTIONS_API_KEY", "options-token")
-    monkeypatch.delenv("FMP_API_KEY", raising=False)
-    client = MarketDataClient()
-
-    async def fake_marketdata_get(url, params, *, cache_ttl_seconds=300):
-        assert url.endswith("/options/chain/AAPL/")
-        assert params["dte"] == "10"
-        assert params["strikeLimit"] == "8"
-        return {
-            "s": "ok",
-            "optionSymbol": ["AAPL260828C00300000", "AAPL260828P00290000"],
-            "underlying": ["AAPL", "AAPL"],
-            "expiration": [1787875200, 1787875200],
-            "side": ["call", "put"],
-            "strike": [300, 290],
-            "bid": [5, 1.1],
-            "ask": [5.4, 1.3],
-            "mid": [5.2, 1.2],
-            "openInterest": [10000, 9000],
-            "volume": [5000, 1500],
-        }
-
-    monkeypatch.setattr(client, "_marketdata_get", fake_marketdata_get)
-
-    rows = asyncio.run(client.option_chain("AAPL"))
-
-    assert rows[0]["side"] == "call"
-    assert rows[0]["optionSymbol"] == "AAPL260828C00300000"
-    assert rows[0]["symbol"] == "AAPL"
-    assert rows[0]["mid"] == 5.2
-    assert rows[1]["side"] == "put"
+    assert client.options_configured is False
+    assert asyncio.run(client.option_chain("AAPL")) == []
 
 
 def test_option_chain_normalizes_configured_row_provider(monkeypatch):
-    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_TOKEN", raising=False)
-    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.setenv("FMP_OPTIONS_CHAIN_PATH", "options-chain")
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
-    client = MarketDataClient(api_key="test-token")
+    client = FmpClient(api_key="test-token")
 
     async def fake_get(url, params, *, cache_ttl_seconds=300):
         assert url.endswith("/options-chain")
@@ -1163,14 +1140,11 @@ def test_option_chain_normalizes_configured_row_provider(monkeypatch):
 
 
 def test_option_chain_uses_fmp_positions_summary(monkeypatch):
-    monkeypatch.delenv("MARKETDATA_OPTIONS_API_KEY", raising=False)
-    monkeypatch.delenv("MARKETDATA_TOKEN", raising=False)
-    monkeypatch.delenv("MARKETDATA_API_KEY", raising=False)
     monkeypatch.delenv("FMP_OPTIONS_CHAIN_PATH", raising=False)
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "true")
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_YEAR", "2026")
     monkeypatch.setenv("FMP_POSITIONS_SUMMARY_QUARTER", "2")
-    client = MarketDataClient(api_key="test-token")
+    client = FmpClient(api_key="test-token")
 
     async def fake_get(url, params, *, cache_ttl_seconds=300):
         assert url.endswith("/institutional-ownership/symbol-positions-summary")

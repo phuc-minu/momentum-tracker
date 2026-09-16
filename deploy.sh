@@ -61,7 +61,6 @@ add_secret_env_if_present() {
 }
 
 add_secret_env_if_present "fmp-api-key" "FMP_API_KEY"
-add_secret_env_if_present "marketdata-api-key" "MARKETDATA_OPTIONS_API_KEY"
 add_secret_env_if_present "openai-api-key" "OPENAI_API_KEY"
 add_secret_env_if_present "app-password" "APP_PASSWORD"
 add_secret_env_if_present "app-session-secret" "APP_SESSION_SECRET"

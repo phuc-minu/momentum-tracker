@@ -4,7 +4,7 @@ import os
 from datetime import UTC, datetime
 from datetime import timedelta
 
-from marketdata import MarketDataClient, MarketDataError, demo_candles
+from fmp import FmpClient, FmpError, demo_candles
 from momentum import adjusted_momentum_score
 from options_activity import analyze_options_activity, demo_options_activity
 from schemas import Candle, DiscoveryCandidate, NewsItem
@@ -53,9 +53,9 @@ async def discover_movers(
             for symbol, sector in universe.items()
         ]
     else:
-        client = MarketDataClient(timeout_seconds=30.0)
+        client = FmpClient(timeout_seconds=30.0)
         if not client.api_key:
-            raise MarketDataError("FMP_API_KEY is required for live market data")
+            raise FmpError("FMP_API_KEY is required for live FMP data")
         universe = _live_discovery_universe()
         candidates = await _discover_live_candidates(
             client,
@@ -83,7 +83,7 @@ async def discover_movers(
 
 
 async def _discover_live_candidates(
-    client: MarketDataClient,
+    client: FmpClient,
     universe: dict[str, str],
     *,
     period_days: int,
@@ -138,7 +138,7 @@ def _sort_discovery_candidates(candidates: list[DiscoveryCandidate]) -> None:
 
 
 async def _build_bulk_price_candidates(
-    client: MarketDataClient,
+    client: FmpClient,
     universe: dict[str, str],
     period_days: int,
 ) -> list[DiscoveryCandidate]:
@@ -222,7 +222,7 @@ def _build_candidate_from_candle_pair(
 
 
 async def _bulk_candles_near_period(
-    client: MarketDataClient,
+    client: FmpClient,
     symbols: list[str],
     latest_timestamp: int,
     period_days: int,
@@ -266,7 +266,7 @@ def _live_discovery_universe() -> dict[str, str]:
     if source == "static":
         return discovery_universe()
     if source != "fmp":
-        raise MarketDataError(f"Unsupported DISCOVERY_SYMBOL_SOURCE: {source}")
+        raise FmpError(f"Unsupported DISCOVERY_SYMBOL_SOURCE: {source}")
     try:
         limit = int(os.getenv("DISCOVERY_SYMBOL_LIMIT", os.getenv("PHASE2_SYMBOL_LIMIT", "500")))
     except ValueError:
@@ -282,9 +282,9 @@ def _live_discovery_universe() -> dict[str, str]:
     try:
         symbols = fetch_fmp_screener_symbols(limit=limit, min_average_volume=min_volume, min_price=min_price)
     except RuntimeError as error:
-        raise MarketDataError(str(error)) from error
+        raise FmpError(str(error)) from error
     if not symbols:
-        raise MarketDataError("FMP stock screener returned no discovery symbols")
+        raise FmpError("FMP stock screener returned no discovery symbols")
     return {
         item["symbol"]: item.get("sector") or "Unclassified"
         for item in symbols
@@ -292,7 +292,7 @@ def _live_discovery_universe() -> dict[str, str]:
 
 
 def _live_request_concurrency() -> int:
-    raw = os.getenv("FMP_CONCURRENCY") or os.getenv("MARKETDATA_CONCURRENCY", "2")
+    raw = os.getenv("FMP_CONCURRENCY", "2")
     try:
         return max(1, min(int(raw), 5))
     except ValueError:
@@ -300,14 +300,14 @@ def _live_request_concurrency() -> int:
 
 
 async def _build_live_price_candidate(
-    client: MarketDataClient,
+    client: FmpClient,
     symbol: str,
     sector: str,
     period_days: int,
 ) -> DiscoveryCandidate | None:
     try:
         candles = await client.candles(symbol, countback=max(period_days + 30, 60))
-    except MarketDataError:
+    except FmpError:
         return None
     if not candles:
         return None
@@ -323,13 +323,13 @@ async def _build_live_price_candidate(
 
 
 async def _enrich_live_candidate(
-    client: MarketDataClient,
+    client: FmpClient,
     candidate: DiscoveryCandidate,
     period_days: int,
 ) -> DiscoveryCandidate | None:
     try:
         candles = await client.candles(candidate.symbol, countback=max(period_days + 30, 60))
-    except MarketDataError:
+    except FmpError:
         return None
 
     earnings, news = await asyncio.gather(
@@ -423,21 +423,21 @@ async def _build_candidate(
     )
 
 
-async def _safe_earnings(client: MarketDataClient, symbol: str) -> list[dict] | None:
+async def _safe_earnings(client: FmpClient, symbol: str) -> list[dict] | None:
     try:
         return await client.earnings(symbol, countback=4)
     except Exception:
         return None
 
 
-async def _safe_news(client: MarketDataClient, symbol: str) -> list[NewsItem]:
+async def _safe_news(client: FmpClient, symbol: str) -> list[NewsItem]:
     try:
         return await client.news(symbol, countback=5)
     except Exception:
         return []
 
 
-async def _safe_option_chain(client: MarketDataClient, symbol: str) -> list[dict]:
+async def _safe_option_chain(client: FmpClient, symbol: str) -> list[dict]:
     try:
         return await client.option_chain(symbol)
     except Exception:

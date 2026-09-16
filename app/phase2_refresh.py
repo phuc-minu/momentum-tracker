@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
-from marketdata import MarketDataClient, MarketDataError, demo_candles
+from fmp import FmpClient, FmpError, demo_candles
 from momentum import adjusted_momentum_score, grade_for_score
 from options_activity import analyze_options_activity, demo_options_activity
 from phase2_db import (
@@ -69,7 +69,7 @@ async def main() -> None:
             concurrency=args.concurrency,
         )
         if not symbols:
-            raise MarketDataError("No symbols met the 30-day price movement requirements")
+            raise FmpError("No symbols met the 30-day price movement requirements")
     benchmark = args.benchmark.strip().upper()
     if benchmark and benchmark not in {item["symbol"] for item in symbols}:
         symbols.append(phase2_symbol(benchmark, name=benchmark, exchange="benchmark", sector="Benchmark"))
@@ -102,7 +102,7 @@ async def main() -> None:
                 countback=args.countback,
             )
             if unresolved_symbols:
-                raise MarketDataError(
+                raise FmpError(
                     "No complete candle history available for "
                     f"{', '.join(unresolved_symbols[:20])}"
                     + (f" and {len(unresolved_symbols) - 20} more" if len(unresolved_symbols) > 20 else "")
@@ -110,7 +110,7 @@ async def main() -> None:
 
             benchmark_candles = candle_map.get(benchmark) if benchmark else []
             if benchmark and not benchmark_candles:
-                raise MarketDataError(f"No complete candle history available for benchmark {benchmark}")
+                raise FmpError(f"No complete candle history available for benchmark {benchmark}")
             mover_symbols = _select_top_price_mover_symbols(
                 candle_map,
                 [item["symbol"] for item in symbols],
@@ -120,7 +120,7 @@ async def main() -> None:
                 min_average_volume=args.min_average_volume,
             )
             if not mover_symbols:
-                raise MarketDataError("No symbols met the 30-day price movement requirements")
+                raise FmpError("No symbols met the 30-day price movement requirements")
             scores = score_market_candidates(
                 {symbol: candle_map[symbol] for symbol in mover_symbols if symbol in candle_map},
                 benchmark_candles or [],
@@ -212,9 +212,9 @@ async def _filter_symbols_by_average_volume(
     days: int,
     concurrency: int,
 ) -> list[dict[str, Any]]:
-    client = MarketDataClient(timeout_seconds=30.0)
+    client = FmpClient(timeout_seconds=30.0)
     if not client.api_key:
-        raise MarketDataError("FMP_API_KEY is required for Phase 2 live refresh")
+        raise FmpError("FMP_API_KEY is required for Phase 2 live refresh")
 
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 
@@ -223,7 +223,7 @@ async def _filter_symbols_by_average_volume(
         async with semaphore:
             try:
                 candles = await client.candles(symbol, countback=days)
-            except MarketDataError:
+            except FmpError:
                 return None
         if len(candles) < days:
             return None
@@ -246,9 +246,9 @@ async def _filter_symbols_by_price_movement(
     limit: int,
     concurrency: int,
 ) -> list[dict[str, Any]]:
-    client = MarketDataClient(timeout_seconds=30.0)
+    client = FmpClient(timeout_seconds=30.0)
     if not client.api_key:
-        raise MarketDataError("FMP_API_KEY is required for Phase 2 live refresh")
+        raise FmpError("FMP_API_KEY is required for Phase 2 live refresh")
 
     countback = max(volume_days, movement_days + 10, 40)
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
@@ -335,9 +335,9 @@ async def _fetch_candles(
     if demo:
         return {symbol: demo_candles(symbol, countback) for symbol in unique_symbols}
 
-    client = MarketDataClient(timeout_seconds=30.0)
+    client = FmpClient(timeout_seconds=30.0)
     if not client.api_key:
-        raise MarketDataError("FMP_API_KEY is required for Phase 2 live refresh")
+        raise FmpError("FMP_API_KEY is required for Phase 2 live refresh")
 
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 
@@ -350,7 +350,7 @@ async def _fetch_candles(
 
 
 async def _fetch_symbol_candles_with_retry(
-    client: MarketDataClient,
+    client: FmpClient,
     symbol: str,
     *,
     countback: int,
@@ -360,7 +360,7 @@ async def _fetch_symbol_candles_with_retry(
     for attempt in range(total_attempts):
         try:
             return await client.candles(symbol, countback=countback)
-        except MarketDataError:
+        except FmpError:
             if attempt == total_attempts - 1:
                 return []
             await asyncio.sleep(0.5 * (attempt + 1))
@@ -497,9 +497,9 @@ async def _score_options(
     if demo:
         return [_option_activity_to_db(symbol, demo_options_activity(symbol)) for symbol in symbols]
 
-    client = MarketDataClient(timeout_seconds=30.0)
+    client = FmpClient(timeout_seconds=30.0)
     if not client.options_configured:
-        raise MarketDataError("An options provider token is required for Phase 2 live options refresh")
+        return [_option_activity_to_db(symbol, analyze_options_activity([])) for symbol in symbols]
 
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
 
@@ -507,7 +507,7 @@ async def _score_options(
         async with semaphore:
             try:
                 rows = await client.option_chain(symbol)
-            except MarketDataError:
+            except FmpError:
                 rows = []
         return _option_activity_to_db(symbol, analyze_options_activity(rows))
 
@@ -538,7 +538,7 @@ async def _score_earnings(
     if demo:
         return {symbol: _default_earnings_metadata(checked=True) for symbol in symbols}
 
-    client = MarketDataClient(timeout_seconds=30.0)
+    client = FmpClient(timeout_seconds=30.0)
     if not client.api_key:
         return {symbol: _default_earnings_metadata() for symbol in symbols}
 
@@ -548,7 +548,7 @@ async def _score_earnings(
         async with semaphore:
             try:
                 earnings = await client.earnings(symbol, countback=4)
-            except MarketDataError:
+            except FmpError:
                 return symbol, _default_earnings_metadata()
         return symbol, _earnings_metadata_for_symbol(earnings, candle_map.get(symbol, []))
 

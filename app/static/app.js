@@ -116,7 +116,7 @@ async function checkHealth() {
     elements.apiStatusText.textContent = "Checking";
     const response = await fetch("/health");
     const payload = await response.json();
-    state.liveDataAvailable = Boolean(payload.marketdata_configured);
+    state.liveDataAvailable = Boolean(payload.fmp_configured);
     elements.apiStatus.className = "status-dot ok";
     elements.apiStatusText.textContent = state.liveDataAvailable ? "Live ready" : "Beta ready";
     renderModeNotice();

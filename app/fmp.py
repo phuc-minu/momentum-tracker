@@ -11,14 +11,14 @@ import httpx
 from schemas import Candle, NewsItem
 
 
-class MarketDataError(RuntimeError):
+class FmpError(RuntimeError):
     pass
 
 
-class MarketDataCache:
+class FmpCache:
     def __init__(self, cache_dir: Path | None = None):
-        self.cache_dir = cache_dir or Path(os.getenv("MARKETDATA_CACHE_DIR", Path(__file__).parent / ".cache" / "marketdata"))
-        self.enabled = os.getenv("MARKETDATA_CACHE_DISABLED", "").strip().lower() not in {"1", "true", "yes", "on"}
+        self.cache_dir = cache_dir or Path(os.getenv("FMP_CACHE_DIR", Path(__file__).parent / ".cache" / "fmp"))
+        self.enabled = os.getenv("FMP_CACHE_DISABLED", "").strip().lower() not in {"1", "true", "yes", "on"}
 
     def get(self, key: str, ttl_seconds: int | None) -> Any | None:
         if not self.enabled:
@@ -65,32 +65,26 @@ class MarketDataCache:
         return self.cache_dir / f"{digest}.json"
 
 
-class MarketDataClient:
-    def __init__(self, api_key: str | None = None, timeout_seconds: float = 20.0, cache: MarketDataCache | None = None):
+class FmpClient:
+    def __init__(self, api_key: str | None = None, timeout_seconds: float = 20.0, cache: FmpCache | None = None):
         self.api_key = api_key or os.getenv("FMP_API_KEY")
         self.base_url = os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com/stable/").rstrip("/") + "/"
         self.fmp_options_chain_path = os.getenv("FMP_OPTIONS_CHAIN_PATH", "").strip()
-        self.marketdata_options_token = (
-            os.getenv("MARKETDATA_OPTIONS_API_KEY")
-            or os.getenv("MARKETDATA_TOKEN")
-            or os.getenv("MARKETDATA_API_KEY")
-        )
-        self.marketdata_base_url = os.getenv("MARKETDATA_BASE_URL", "https://api.marketdata.app/v1/").rstrip("/") + "/"
         self.timeout_seconds = timeout_seconds
-        self.cache = cache or MarketDataCache()
+        self.cache = cache or FmpCache()
 
     @property
     def options_configured(self) -> bool:
-        return bool(self.marketdata_options_token or self.api_key or self.fmp_options_chain_path)
+        return bool(self.api_key and (self.fmp_options_chain_path or _fmp_positions_summary_enabled()))
 
     async def candles(self, symbol: str, countback: int = 60, resolution: str = "D") -> list[Candle]:
         if not self.api_key:
-            raise MarketDataError("FMP_API_KEY is required for live market data")
+            raise FmpError("FMP_API_KEY is required for live FMP data")
 
         payload = await self._get(
             self._url("historical-price-eod/full"),
             {"symbol": symbol, "from": _from_date_for_countback(countback)},
-            cache_ttl_seconds=_cache_ttl("MARKETDATA_CANDLE_CACHE_SECONDS", 900),
+            cache_ttl_seconds=_cache_ttl("FMP_CANDLE_CACHE_SECONDS", 900),
         )
         return _parse_fmp_historical_payload(payload)[-countback:]
 
@@ -102,7 +96,7 @@ class MarketDataClient:
         resolution: str = "D",
     ) -> dict[str, Candle]:
         if not self.api_key:
-            raise MarketDataError("FMP_API_KEY is required for live market data")
+            raise FmpError("FMP_API_KEY is required for live FMP data")
         if not symbols:
             return {}
 
@@ -113,23 +107,23 @@ class MarketDataClient:
 
     async def earnings(self, symbol: str, countback: int = 2) -> list[dict]:
         if not self.api_key:
-            raise MarketDataError("FMP_API_KEY is required for live earnings data")
+            raise FmpError("FMP_API_KEY is required for live earnings data")
 
         payload = await self._get(
             self._url("earnings"),
             {"symbol": symbol, "limit": countback},
-            cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
+            cache_ttl_seconds=_cache_ttl("FMP_REFERENCE_CACHE_SECONDS", 3600),
         )
         return _as_rows(payload)[:countback]
 
     async def news(self, symbol: str, countback: int = 5) -> list[NewsItem]:
         if not self.api_key:
-            raise MarketDataError("FMP_API_KEY is required for live news data")
+            raise FmpError("FMP_API_KEY is required for live news data")
 
         payload = await self._get(
             self._url("news/stock"),
             {"symbols": symbol, "limit": countback},
-            cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
+            cache_ttl_seconds=_cache_ttl("FMP_REFERENCE_CACHE_SECONDS", 3600),
         )
         rows = _as_rows(payload)
         return [
@@ -150,16 +144,11 @@ class MarketDataClient:
         return None, "unavailable"
 
     async def option_chain(self, symbol: str) -> list[dict]:
-        if self.marketdata_options_token:
-            rows = await self._marketdata_option_chain(symbol)
-            if rows:
-                return rows
-
         if self.api_key and _fmp_positions_summary_enabled():
             payload = await self._get(
                 self._url("institutional-ownership/symbol-positions-summary"),
                 _fmp_positions_summary_params(symbol),
-                cache_ttl_seconds=_cache_ttl("MARKETDATA_REFERENCE_CACHE_SECONDS", 3600),
+                cache_ttl_seconds=_cache_ttl("FMP_REFERENCE_CACHE_SECONDS", 3600),
             )
             rows = _fmp_positions_summary_to_option_rows(payload)
             if rows:
@@ -167,23 +156,15 @@ class MarketDataClient:
 
         if self.fmp_options_chain_path:
             if not self.api_key:
-                raise MarketDataError("FMP_API_KEY is required for FMP options data")
+                raise FmpError("FMP_API_KEY is required for FMP options data")
             payload = await self._get(
                 self._url(self.fmp_options_chain_path.format(symbol=symbol)),
                 {"symbol": symbol},
-                cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
+                cache_ttl_seconds=_cache_ttl("FMP_LATEST_CACHE_SECONDS", 300),
             )
             return _normalize_option_rows(payload)
 
         return []
-
-    async def _marketdata_option_chain(self, symbol: str) -> list[dict]:
-        payload = await self._marketdata_get(
-            self._marketdata_url(f"options/chain/{symbol.upper()}/"),
-            _marketdata_options_params(),
-            cache_ttl_seconds=_cache_ttl("MARKETDATA_OPTIONS_CACHE_SECONDS", 300),
-        )
-        return _normalize_option_rows(payload)
 
     async def _get(self, url: str, params: dict, *, cache_ttl_seconds: int | None = 300) -> Any:
         request_params = {**params, "apikey": self.api_key}
@@ -197,11 +178,11 @@ class MarketDataClient:
                 response = await client.get(url, params=request_params)
                 response.raise_for_status()
             except httpx.HTTPStatusError as error:
-                raise MarketDataError(_http_error_message(error)) from error
+                raise FmpError(_http_error_message(error)) from error
             except httpx.TimeoutException as error:
-                raise MarketDataError("FMP request timed out") from error
+                raise FmpError("FMP request timed out") from error
             except httpx.HTTPError as error:
-                raise MarketDataError(f"FMP request failed: {error}") from error
+                raise FmpError(f"FMP request failed: {error}") from error
             if response.status_code == 204:
                 payload = {"s": "no_data"}
             else:
@@ -211,42 +192,8 @@ class MarketDataClient:
             self.cache.set(cache_key, payload)
         return payload
 
-    async def _marketdata_get(self, url: str, params: dict, *, cache_ttl_seconds: int | None = 300) -> Any:
-        cache_key = _cache_key(url, params)
-        cached_payload = self.cache.get(cache_key, cache_ttl_seconds)
-        if cached_payload is not None:
-            return cached_payload
-
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            try:
-                response = await client.get(
-                    url,
-                    params=params,
-                    headers={
-                        "Accept": "application/json",
-                        "Authorization": f"Bearer {self.marketdata_options_token}",
-                    },
-                )
-                if response.status_code == 204:
-                    return {}
-                response.raise_for_status()
-            except httpx.HTTPStatusError as error:
-                raise MarketDataError(_http_error_message(error, provider="MarketData.app")) from error
-            except httpx.TimeoutException as error:
-                raise MarketDataError("MarketData.app request timed out") from error
-            except httpx.HTTPError as error:
-                raise MarketDataError(f"MarketData.app request failed: {error}") from error
-            payload = response.json()
-
-        if isinstance(payload, (dict, list)):
-            self.cache.set(cache_key, payload)
-        return payload
-
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path.lstrip('/')}"
-
-    def _marketdata_url(self, path: str) -> str:
-        return f"{self.marketdata_base_url}{path.lstrip('/')}"
 
     async def _latest_quotes_as_candles(self, symbols: list[str]) -> dict[str, Candle]:
         candles = {}
@@ -254,7 +201,7 @@ class MarketDataClient:
             payload = await self._get(
                 self._url("quote"),
                 {"symbol": ",".join(batch)},
-                cache_ttl_seconds=_cache_ttl("MARKETDATA_LATEST_CACHE_SECONDS", 300),
+                cache_ttl_seconds=_cache_ttl("FMP_LATEST_CACHE_SECONDS", 300),
             )
             for row in _as_rows(payload):
                 candle = _fmp_quote_to_candle(row)
@@ -302,25 +249,6 @@ def _fmp_positions_summary_enabled() -> bool:
 def _fmp_positions_summary_params(symbol: str) -> dict[str, int | str]:
     quarter, year = _fmp_positions_summary_period()
     return {"symbol": symbol, "year": year, "quarter": quarter}
-
-
-def _marketdata_options_params() -> dict[str, str]:
-    params = {
-        "dte": os.getenv("MARKETDATA_OPTIONS_DTE", "10"),
-        "strikeLimit": os.getenv("MARKETDATA_OPTIONS_STRIKE_LIMIT", "8"),
-        "weekly": os.getenv("MARKETDATA_OPTIONS_WEEKLY", "true"),
-        "monthly": os.getenv("MARKETDATA_OPTIONS_MONTHLY", "true"),
-    }
-    mode = os.getenv("MARKETDATA_OPTIONS_MODE", "").strip()
-    if mode:
-        params["mode"] = mode
-    min_volume = os.getenv("MARKETDATA_OPTIONS_MIN_VOLUME", "").strip()
-    if min_volume:
-        params["minVolume"] = min_volume
-    min_open_interest = os.getenv("MARKETDATA_OPTIONS_MIN_OPEN_INTEREST", "").strip()
-    if min_open_interest:
-        params["minOpenInterest"] = min_open_interest
-    return params
 
 
 def _fmp_positions_summary_period() -> tuple[int, int]:

@@ -88,7 +88,6 @@ function Add-SecretEnvIfPresent {
 }
 
 Add-SecretEnvIfPresent "fmp-api-key" "FMP_API_KEY"
-Add-SecretEnvIfPresent "marketdata-api-key" "MARKETDATA_OPTIONS_API_KEY"
 Add-SecretEnvIfPresent "openai-api-key" "OPENAI_API_KEY"
 Add-SecretEnvIfPresent "app-password" "APP_PASSWORD"
 Add-SecretEnvIfPresent "app-session-secret" "APP_SESSION_SECRET"
@@ -112,8 +111,6 @@ if ($envArgs.Count -gt 0) {
 $databaseSecretId = az keyvault secret show --vault-name $vault --name database-url --query id -o tsv 2>$null
 $fmpSecretId = az keyvault secret show --vault-name $vault --name fmp-api-key --query id -o tsv 2>$null
 if ($databaseSecretId -and $fmpSecretId) {
-  $marketDataSecretId = az keyvault secret show --vault-name $vault --name marketdata-api-key --query id -o tsv 2>$null
-  $includeMarketDataOptionsSecret = [bool]$marketDataSecretId
   az deployment group create `
     --resource-group $ResourceGroup `
     --template-file ./infra/db-refresh-job.bicep `
@@ -124,7 +121,6 @@ if ($databaseSecretId -and $fmpSecretId) {
       registryServer=$acrLogin `
       identityId=$identityId `
       keyVaultName=$vault `
-      includeMarketDataOptionsSecret=$includeMarketDataOptionsSecret `
     --output none
   Write-Host "Scheduled db refresh: weekdays at 22:30 UTC"
 } else {

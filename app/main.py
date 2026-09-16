@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from discover import discover_movers
-from marketdata import MarketDataClient, MarketDataError, demo_candles
+from fmp import FmpClient, FmpError, demo_candles
 from momentum import score_symbol
 from phase2_db import connect, fetch_latest_refresh_run, fetch_phase2_candidates
 from schemas import DiscoveryResponse, Phase2CandidateResponse, Phase2RefreshStatus, ScanRequest, ScanResponse
@@ -37,11 +37,11 @@ async def no_cache_static_assets(request, call_next):
 def health():
     return {
         "status": "ok",
-        "marketdata_configured": bool(os.getenv("FMP_API_KEY")),
+        "fmp_configured": bool(os.getenv("FMP_API_KEY")),
         "provider": "fmp",
-        "options_provider": "marketdata.app"
-        if (os.getenv("MARKETDATA_OPTIONS_API_KEY") or os.getenv("MARKETDATA_TOKEN") or os.getenv("MARKETDATA_API_KEY"))
-        else ("fmp" if os.getenv("FMP_OPTIONS_CHAIN_PATH") or os.getenv("FMP_POSITIONS_SUMMARY_ENABLED", "").lower() in {"1", "true", "yes", "on"} else None),
+        "options_provider": "fmp"
+        if os.getenv("FMP_OPTIONS_CHAIN_PATH") or os.getenv("FMP_POSITIONS_SUMMARY_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+        else None,
         "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
     }
 
@@ -162,7 +162,7 @@ async def discover(
             exclude_earnings=exclude_earnings,
             demo=demo,
         )
-    except MarketDataError as error:
+    except FmpError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
     return DiscoveryResponse(
@@ -231,9 +231,9 @@ async def run_scan(request: ScanRequest) -> ScanResponse:
             candle_map = {symbol: demo_candles(symbol, request.countback) for symbol in symbols}
             data_mode = "demo"
         else:
-            client = MarketDataClient()
+            client = FmpClient()
             if not client.api_key:
-                raise MarketDataError("FMP_API_KEY is required for live market data")
+                raise FmpError("FMP_API_KEY is required for live FMP data")
             if benchmark:
                 benchmark_candles, symbol_rows = await asyncio.gather(
                     client.candles(benchmark, request.countback),
@@ -253,8 +253,8 @@ async def run_scan(request: ScanRequest) -> ScanResponse:
         ]
         skipped_symbols = skipped_symbols if not request.demo else []
         if not results and skipped_symbols:
-            raise MarketDataError(f"FMP returned no usable candle data for {', '.join(skipped_symbols)}")
-    except MarketDataError as error:
+            raise FmpError(f"FMP returned no usable candle data for {', '.join(skipped_symbols)}")
+    except FmpError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -292,14 +292,14 @@ def _is_decimal(value) -> bool:
     return value.__class__.__name__ == "Decimal"
 
 
-async def _fetch_symbols(client: MarketDataClient, symbols: list[str], countback: int):
+async def _fetch_symbols(client: FmpClient, symbols: list[str], countback: int):
     semaphore = asyncio.Semaphore(2)
 
     async def fetch(symbol: str):
         async with semaphore:
             try:
                 return symbol, await client.candles(symbol, countback), None
-            except MarketDataError as error:
+            except FmpError as error:
                 return symbol, [], str(error)
 
     return await asyncio.gather(*(fetch(symbol) for symbol in symbols))

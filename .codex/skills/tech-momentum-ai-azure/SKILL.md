@@ -44,12 +44,10 @@ Key Vault stores:
 - `openai-api-key`
 - `fmp-api-key`
 - `database-url`
-- `marketdata-api-key` (optional, MarketData.app options-only token)
 
 Container App secret refs use the same secret names and expose:
 - `OPENAI_API_KEY=secretref:openai-api-key`
 - `FMP_API_KEY=secretref:fmp-api-key`
-- `MARKETDATA_OPTIONS_API_KEY=secretref:marketdata-api-key` when options enrichment is enabled
 - `DATABASE_URL=secretref:database-url` when Phase 2 PostgreSQL is configured
 
 Do not print secret values. Check only presence or configuration status.
@@ -132,8 +130,6 @@ Safe refresh knobs:
 - `PHASE2_TOP_N=50`
 - `PHASE2_MIN_PRICE=10`
 - `PHASE2_FMP_CONCURRENCY=2`
-- `MARKETDATA_OPTIONS_DTE=10`
-- `MARKETDATA_OPTIONS_STRIKE_LIMIT=8`
 
 Run the demo job from `app`:
 
@@ -158,7 +154,7 @@ Azure PostgreSQL access:
 - Azure CLI may require sandbox escalation because it reads `C:\Users\phuct\.azure\azureProfile.json`.
 - Git may warn about denied access to `C:\Users\phuct\.config\git\ignore`; this warning has not blocked commits or pushes.
 - `gh` CLI was not installed as of August 16, 2026. Use normal `git` for commit/push unless GitHub PR automation is specifically needed.
-- FMP is the live price/history/discovery provider. Use `FMP_API_KEY` with base URL `https://financialmodelingprep.com/stable/`. MarketData.app may be used only for options enrichment through `MARKETDATA_OPTIONS_API_KEY`; put/call ratio is 10-DTE option-chain volume only. Live Discovery and Phase 2 refresh default to FMP `company-screener` for symbol selection.
+- FMP is the live price/history/discovery/options provider. Use `FMP_API_KEY` with base URL `https://financialmodelingprep.com/stable/`. Do not wire MarketData.app into this deployment. Options enrichment can use `FMP_OPTIONS_CHAIN_PATH` or FMP positions summary when enabled; otherwise options fields remain unavailable. Live Discovery and Phase 2 refresh default to FMP `company-screener` for symbol selection.
 - FMP stable `quote` endpoint must be treated as single-symbol only. `/stable/quote?symbol=NVDA` works, but comma-batched requests such as `/stable/quote?symbol=NVDA,XOM` have returned HTTP 200 with an empty array. Use one request per symbol unless FMP support confirms a documented bulk quote endpoint.
 - The frontend now falls back to beta/demo data when live FMP scanner or discovery requests fail.
 - The dashboard and token-spending endpoints require login. `/health` and static assets remain public.

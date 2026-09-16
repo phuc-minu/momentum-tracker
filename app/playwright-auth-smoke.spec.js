@@ -47,7 +47,7 @@ test("authenticated dashboard smoke test", async ({ page }) => {
   expect(health).toMatchObject({
     status: "ok",
     provider: "fmp",
-    marketdata_configured: true,
+    fmp_configured: true,
   });
 
   await page.screenshot({ path: ".local/playwright-auth-smoke.png", fullPage: true });
