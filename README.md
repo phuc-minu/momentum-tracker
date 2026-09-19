@@ -52,6 +52,8 @@ $env:FMP_POSITIONS_SUMMARY_ENABLED="false"
 
 ## API
 
+Options columns in Discovery and Overextended, and the Overextended options request, are temporarily commented out pending a replacement options endpoint. The retained Overextended implementation provides **3M Options Vol** and **Options Expiry**. Volume is the sum of call and put contract volumes across all strikes for the available expiration nearest three calendar months from today (within 15 days); hover the total for the call/put breakdown. This requires `FMP_OPTIONS_CHAIN_PATH` to return dated option-chain rows with volume. Missing or incomplete volume is displayed as unavailable, and institutional holdings are never substituted for trading volume. Options load independently from the saved stock scores through the authenticated `/options/three-month-volume?symbols=AAPL,MSFT` endpoint.
+
 - `GET /health` returns service and API-key configuration status
 - `GET /universe` returns the configured default universe
 - `GET /scan?symbols=NVDA,MSFT&demo=true` ranks symbols
@@ -155,3 +157,7 @@ python -m pytest
 ## Next implementation step
 
 Add persisted watchlists, scheduled scans, and optional GPT catalyst analysis over ranked candidates.
+
+Discovery **Date Added** is the first recorded list appearance in UTC, persisted on the symbol even if it leaves and later returns. Tracking starts on the first database refresh after this feature is installed; older first-appearance dates cannot be reconstructed from the latest-score-only database. Unknown dates display as an em dash. The refresh initializes the idempotent `symbols.first_listed_at` schema migration automatically.
+
+Discovery **Price When Added** stores the closing price used at the first recorded list appearance. This value is preserved across subsequent refreshes and re-entry. The refresh adds `symbols.first_listed_price` and backfills existing symbols only when the retained score timestamp exactly matches their first appearance; otherwise historical entry prices remain unknown.

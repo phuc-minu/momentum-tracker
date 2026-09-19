@@ -127,6 +127,8 @@ class Phase2Candidate(BaseModel):
     factors: dict
     notes: list[str]
     scored_at: str
+    first_listed_at: str | None = None
+    first_listed_price: float | None = None
     options_confirmation_score: float | None = None
     options_signal: str | None = None
     call_activity: str | None = None

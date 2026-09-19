@@ -219,6 +219,30 @@ def phase2_status(_: None = Depends(require_auth)):
     return _serialize_phase2_row(row) if row else None
 
 
+@app.get("/options/three-month-volume")
+async def three_month_options_volume(
+    symbols: str = Query(min_length=1, max_length=2000),
+    _: None = Depends(require_auth),
+):
+    tickers = dedupe_symbols(parse_symbols(symbols))
+    if not tickers or len(tickers) > 200 or any(
+        len(symbol) > 15 or not all(c.isalnum() or c in ".-" for c in symbol) for symbol in tickers
+    ):
+        raise HTTPException(status_code=422, detail="Provide 1–200 valid symbols")
+    client = FmpClient()
+    semaphore = asyncio.Semaphore(2)
+
+    async def fetch_volume(symbol):
+        async with semaphore:
+            try:
+                return await client.three_month_options_volume(symbol)
+            except (FmpError, ValueError):
+                return {"symbol": symbol, "expiration": None, "call_volume": None,
+                        "put_volume": None, "total_volume": None}
+
+    return {"results": await asyncio.gather(*(fetch_volume(symbol) for symbol in tickers))}
+
+
 async def run_scan(request: ScanRequest) -> ScanResponse:
     benchmark = request.benchmark.strip().upper()
     symbols = [symbol for symbol in dedupe_symbols(request.symbols) if not benchmark or symbol != benchmark]

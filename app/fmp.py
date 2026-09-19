@@ -2,6 +2,7 @@ import hashlib
 import json
 import math
 import os
+import calendar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -166,6 +167,23 @@ class FmpClient:
 
         return []
 
+    async def three_month_options_volume(self, symbol: str) -> dict:
+        today = datetime.now(UTC).date()
+        month_index = today.year * 12 + today.month - 1 + 3
+        year, month = divmod(month_index, 12)
+        target = today.replace(year=year, month=month + 1, day=min(today.day, calendar.monthrange(year, month + 1)[1]))
+        empty = {"symbol": symbol, "target_expiration": target.isoformat(), "expiration": None,
+                 "call_volume": None, "put_volume": None, "total_volume": None}
+        # Institutional positions are holdings, not contract trading volume.
+        if not self.api_key or not self.fmp_options_chain_path:
+            return empty
+        payload = await self._get(
+            self._url(self.fmp_options_chain_path.format(symbol=symbol)),
+            {"symbol": symbol},
+            cache_ttl_seconds=_cache_ttl("FMP_LATEST_CACHE_SECONDS", 300),
+        )
+        return summarize_expiration_volume(_normalize_option_rows(payload), target, empty)
+
     async def _get(self, url: str, params: dict, *, cache_ttl_seconds: int | None = 300) -> Any:
         request_params = {**params, "apikey": self.api_key}
         cache_key = _cache_key(url, request_params)
@@ -221,6 +239,32 @@ class FmpClient:
             if rows:
                 candles[symbol.upper()] = rows[-1]
         return candles
+
+
+def summarize_expiration_volume(rows: list[dict], target, empty: dict) -> dict:
+    expirations = {}
+    for row in rows:
+        value = row.get("expiration")
+        try:
+            if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+                expiration = datetime.fromtimestamp(float(value), UTC).date()
+            else:
+                expiration = datetime.fromisoformat(str(value)[:10]).date()
+        except (ValueError, TypeError, OverflowError, OSError):
+            continue
+        if abs((expiration - target).days) <= 15:
+            expirations.setdefault(expiration, []).append(row)
+    if not expirations:
+        return empty
+    expiration = min(expirations, key=lambda day: (abs((day - target).days), day))
+    totals = {}
+    for side in ("call", "put"):
+        contracts = [row for row in expirations[expiration] if row.get("side") == side]
+        volumes = [_as_float(row.get("volume")) for row in contracts]
+        totals[side] = sum(volumes) if volumes and all(v is not None and math.isfinite(v) and v >= 0 for v in volumes) else None
+    return {**empty, "expiration": expiration.isoformat(), "call_volume": totals["call"],
+            "put_volume": totals["put"], "total_volume": totals["call"] + totals["put"]
+            if all(v is not None for v in totals.values()) else None}
 
 
 def _cache_key(url: str, params: dict) -> str:

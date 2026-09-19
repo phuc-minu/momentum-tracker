@@ -133,12 +133,15 @@ def test_dashboard_served_at_root():
     assert response.status_code == 200
     assert "Stock Momentum AI" in response.text
     assert "PostgreSQL Momentum Candidates" in response.text
+    assert "Date Added" in response.text
+    assert "Price When Added" in response.text
+    assert 'data-sort-key="calls"' not in response.text
     assert "Overextended" in response.text
     assert "Pullback Watch" in response.text
     assert "Biotech Catalysts" in response.text
     assert "Future Event Tracker" in response.text
     assert "Demo" not in response.text
-    for sort_key in ("symbol", "price", "rsi", "score", "growth", "volume", "calls", "options"):
+    for sort_key in ("symbol", "price", "rsi", "score", "growth", "volume", "options"):
         assert f'data-sort-key="{sort_key}"' in response.text
     for sort_key in ("rank", "sector", "signal", "source"):
         assert f'data-sort-key="{sort_key}"' not in response.text

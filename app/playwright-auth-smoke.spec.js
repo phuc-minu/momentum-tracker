@@ -17,7 +17,7 @@ test("authenticated dashboard smoke test", async ({ page }) => {
   await expect(page.locator("#discoverMeta")).not.toHaveText("Loading candidates", { timeout: 30000 });
   await expect(page.locator("#discoveryPanel")).toContainText("Symbol");
   await expect(page.locator("#discoveryPanel")).toContainText("Score");
-  await expect(page.locator("#discoveryPanel")).toContainText("Options");
+  await expect(page.locator("#discoveryPanel")).not.toContainText("Put/Call 10D");
 
   await page.getByRole("button", { name: "Overextended" }).click();
   await expect(page.getByRole("button", { name: "Overextended" })).toHaveClass(/active/);
@@ -27,6 +27,9 @@ test("authenticated dashboard smoke test", async ({ page }) => {
   await expect(page.locator("#overextendedPanel")).toContainText("Risk");
   await expect(page.locator("#overextendedPanel")).toContainText("RSI");
   await expect(page.locator("#overextendedPanel")).toContainText("Very high");
+  await expect(page.locator("#overextendedPanel")).not.toContainText("3M Options Vol");
+  await expect(page.locator("#overextendedPanel")).not.toContainText("Options Expiry");
+  await expect(page.locator("#overextendedBody")).not.toContainText("Loading…", { timeout: 30000 });
 
   await page.getByRole("button", { name: "Biotech Catalysts" }).click();
   await expect(page.getByRole("button", { name: "Biotech Catalysts" })).toHaveClass(/active/);

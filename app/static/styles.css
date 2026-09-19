@@ -450,7 +450,7 @@ table {
 }
 
 .discover-table {
-  min-width: 1468px;
+  min-width: 1480px;
   table-layout: fixed;
   font-size: 12px;
 }
@@ -459,6 +459,11 @@ table {
   min-width: 1180px;
   table-layout: fixed;
   font-size: 12px;
+}
+
+.overextended-table .col-options-volume,
+.overextended-table .col-options-expiry {
+  width: 135px;
 }
 
 .biotech-table {
@@ -864,4 +869,12 @@ tbody tr:hover {
   .status-dot.loading {
     animation: none;
   }
+}
+
+.discover-table .col-date-added {
+  width: 112px;
+}
+
+.discover-table .col-price-added {
+  width: 128px;
 }

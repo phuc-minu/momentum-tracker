@@ -54,7 +54,6 @@ const DISCOVERY_SORT_CONFIG = {
   score: { type: "number", direction: "desc", value: (item) => item.momentum_score },
   growth: { type: "number", direction: "desc", value: (item) => item.return_2w },
   volume: { type: "number", direction: "desc", value: (item) => item.volume_ratio_20d },
-  calls: { type: "number", direction: "desc", value: (item) => item.call_volume },
   options: { type: "number", direction: "asc", value: (item) => item.put_call_ratio },
 };
 
@@ -236,12 +235,40 @@ async function runOverextended() {
     const refreshed = payload.results[0]?.scored_at ? ` refreshed ${formatDateTime(payload.results[0].scored_at)}` : "";
     elements.overextendedMeta.textContent = `${state.overextendedRows.length} pullback watches${refreshed}`;
     renderOverextendedRows();
+    // Options paused until a replacement endpoint is available.
+    // loadOverextendedOptions(state.overextendedRows);
   } catch (error) {
     if (error instanceof AuthRequiredError) return;
     state.overextendedRows = [];
     elements.overextendedMeta.textContent = error.message;
     elements.overextendedBody.innerHTML = `<tr><td class="empty-state" colspan="11">${error.message}</td></tr>`;
   }
+}
+
+async function loadOverextendedOptions(rows) {
+  if (!rows.length) return;
+  rows.forEach((row) => { row.options_loading = true; });
+  renderOverextendedRows();
+  try {
+    const response = await fetch(`/options/three-month-volume?symbols=${encodeURIComponent(rows.map((row) => row.symbol).join(","))}`, { credentials: "same-origin" });
+    const payload = await readJsonResponse(response);
+    requireAuthenticated(response, payload);
+    if (!response.ok) throw new Error("Options volume unavailable");
+    const bySymbol = new Map(payload.results.map((row) => [row.symbol, row]));
+    rows.forEach((row) => { row.options_3m = bySymbol.get(row.symbol); });
+  } catch (error) {
+    // Keep the pullback watch usable if the options provider is unavailable.
+  } finally {
+    rows.forEach((row) => { row.options_loading = false; });
+    if (state.overextendedRows === rows) renderOverextendedRows();
+  }
+}
+
+function formatThreeMonthOptions(item) {
+  if (item.options_loading) return "Loading…";
+  const options = item.options_3m;
+  if (options?.total_volume === null || options?.total_volume === undefined) return "Unavailable";
+  return `<span title="Calls: ${options.call_volume.toLocaleString()} · Puts: ${options.put_volume.toLocaleString()}">${options.total_volume.toLocaleString()}</span>`;
 }
 
 function setButtonLoading(button, isLoading, label = "Loading") {
@@ -432,8 +459,11 @@ function renderSortedDiscoveryRows() {
           <td>${formatPercent(item.return_2w)}</td>
           <td>${formatSignal(item.price_signal)}</td>
           <td>${formatRatio(item.volume_ratio_20d)}</td>
-          <td>${formatCallActivity(item)}</td>
+${/* Options columns paused; restore this template when an endpoint is available.
           <td>${formatPutCallVolumeRatio(item)}</td>
+*/ ""}
+          <td>${formatDateAdded(item.first_listed_at)}</td>
+          <td>${formatPrice(item.first_listed_price)}</td>
           <td class="catalyst-cell">${formatCatalystSetup(item)}</td>
         </tr>
       `;
@@ -457,6 +487,8 @@ function phase2ToDiscoveryRow(item, periodDays) {
     return_1m: factors.return_1m,
     return_2w: growth,
     last_close: item.last_close,
+    first_listed_at: item.first_listed_at,
+    first_listed_price: item.first_listed_price,
     call_volume: item.call_volume,
     call_open_interest: item.call_open_interest,
     call_activity_ratio: item.call_activity_ratio,
@@ -541,6 +573,10 @@ function renderOverextendedRows() {
         <td>${formatPercent(item.distance_to_50d_sma)}</td>
         <td>${formatPercent(item.distance_to_20d_high)}</td>
         <td>${formatRatio(item.current_volume_ratio_20d)}</td>
+${/* Options columns paused; restore this template when an endpoint is available.
+        <td>${formatThreeMonthOptions(item)}</td>
+        <td>${item.options_3m?.expiration || "—"}</td>
+*/ ""}
         <td><span class="setup-pill">${item.setup}</span></td>
         <td class="reason-cell">${item.reasons}</td>
       </tr>
@@ -809,6 +845,12 @@ function compactNumber(value) {
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
   if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
   return String(value);
+}
+
+function formatDateAdded(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toISOString().slice(0, 10);
 }
 
 function formatDateTime(value) {

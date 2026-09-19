@@ -102,8 +102,11 @@
                 <col class="col-growth" />
                 <col class="col-signal" />
                 <col class="col-volume" />
-                <col class="col-calls" />
+                <!-- Options columns paused until a replacement endpoint is available.
                 <col class="col-options" />
+                -->
+                <col class="col-date-added" />
+                <col class="col-price-added" />
                 <col class="col-catalyst-setup" />
               </colgroup>
               <thead>
@@ -147,18 +150,16 @@
                       <span class="sort-indicator" aria-hidden="true">↕</span>
                     </button>
                   </th>
-                  <th>
-                    <button class="sort-button" type="button" data-sort-key="calls">
-                      <span>Calls</span>
-                      <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
+                  <!-- Options columns paused.
                   <th>
                     <button class="sort-button" type="button" data-sort-key="options">
                       <span>Put/Call 10D</span>
                       <span class="sort-indicator" aria-hidden="true">↕</span>
                     </button>
                   </th>
+                  -->
+                  <th title="First recorded appearance on the Discovery list (UTC). Tracking begins with the first refresh after this feature is enabled.">Date Added</th>
+                  <th title="Closing price used when the symbol first appeared on the list. Preserved across refreshes; unavailable historical values are shown as an em dash.">Price When Added</th>
                   <th>Source / Setup</th>
                 </tr>
               </thead>
@@ -196,6 +197,10 @@
                 <col class="col-distance" />
                 <col class="col-distance" />
                 <col class="col-volume" />
+                <!-- Options columns paused until a replacement endpoint is available.
+                <col class="col-options-volume" />
+                <col class="col-options-expiry" />
+                -->
                 <col class="col-setup" />
                 <col class="col-reason" />
               </colgroup>
@@ -210,6 +215,10 @@
                   <th>50D</th>
                   <th>20D High</th>
                   <th>Volume</th>
+                  <!-- Options columns paused.
+                  <th title="Call + put trading volume across all strikes for the expiration nearest three calendar months away (within 15 days). Hover a value for the breakdown.">3M Options Vol</th>
+                  <th>Options Expiry</th>
+                  -->
                   <th>Setup</th>
                   <th>Why</th>
                 </tr>
