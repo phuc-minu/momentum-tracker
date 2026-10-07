@@ -57,7 +57,7 @@ def test_dashboard_markup_satisfies_javascript_dom_contract():
     assert tab_targets <= declared_ids
 
     sort_keys = set(re.findall(r'data-sort-key="([^"]+)"', html))
-    assert sort_keys == {"symbol", "price", "rsi", "score", "growth", "volume", "options"}
+    assert sort_keys == {"rank", "symbol", "price", "rsi", "score", "growth", "volume", "options"}
 
 
 def test_auth_flow_protects_dashboard_data_apis(monkeypatch):

@@ -48,6 +48,7 @@ const DEFAULT_BIOTECH_EVENTS = [
 ];
 
 const DISCOVERY_SORT_CONFIG = {
+  rank: { type: "number", direction: "asc", value: (item) => item.discovery_rank },
   symbol: { type: "text", direction: "asc", value: (item) => item.symbol },
   price: { type: "number", direction: "desc", value: (item) => item.last_close },
   rsi: { type: "number", direction: "desc", value: (item) => item.rsi_14 },
