@@ -73,6 +73,9 @@ $secretArgs = @()
 $envArgs = @()
 $discoveryOptions = if ($env:DISCOVERY_OPTIONS) { $env:DISCOVERY_OPTIONS } else { "true" }
 $envArgs += "DISCOVERY_OPTIONS=$discoveryOptions"
+if ($env:FMP_OPTIONS_CHAIN_PATH) {
+  $envArgs += "FMP_OPTIONS_CHAIN_PATH=$env:FMP_OPTIONS_CHAIN_PATH"
+}
 
 function Add-SecretEnvIfPresent {
   param(
@@ -121,6 +124,7 @@ if ($databaseSecretId -and $fmpSecretId) {
       registryServer=$acrLogin `
       identityId=$identityId `
       keyVaultName=$vault `
+      fmpOptionsChainPath="$env:FMP_OPTIONS_CHAIN_PATH" `
     --output none
   Write-Host "Scheduled db refresh: weekdays at 22:30 UTC"
 } else {

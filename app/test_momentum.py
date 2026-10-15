@@ -22,7 +22,7 @@ from phase2_refresh import (
     _score_options,
     _screener_warning_logs,
 )
-from phase2_db import fetch_latest_refresh_run, fetch_phase2_candidates, fetch_recent_daily_bars, insert_refresh_log, prune_scores_for_run
+from phase2_db import fetch_latest_refresh_run, fetch_phase2_candidates, fetch_recent_daily_bars, insert_refresh_log, prune_scores_for_run, upsert_momentum_scores
 from phase2_pipeline import score_market_candidates
 from schemas import Candle, DiscoveryCandidate, MomentumFactors
 from symbol_source import configured_phase2_symbols, load_phase2_symbols
@@ -817,6 +817,42 @@ def test_phase2_refresh_prunes_stale_scores():
     assert "delete from momentum_scores where run_id is distinct from %s" in connection.cursor_instance.queries[1][0]
     assert connection.cursor_instance.queries[0][1] == (7,)
     assert connection.cursor_instance.queries[1][1] == (7,)
+
+
+def test_first_listed_timestamp_uses_score_timestamp():
+    class FakeCursor:
+        queries = []
+
+        def executemany(self, query, values):
+            self.queries.append((query, values))
+
+        def execute(self, query, params=None):
+            self.queries.append((query, params))
+            return self
+
+    class FakeConnection:
+        cursor_instance = FakeCursor()
+
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self.cursor_instance
+
+        def __exit__(self, *args):
+            return False
+
+        def commit(self):
+            return None
+
+    upsert_momentum_scores(FakeConnection(), 3, [{
+        "symbol": "AAPL", "score": 90, "grade": "A", "setup": "breakout",
+        "last_close": 200, "factors": {}, "notes": [],
+    }])
+
+    query = FakeConnection.cursor_instance.queries[1][0]
+    assert "set first_listed_at = m.scored_at" in query
+    assert "first_listed_at = now()" not in query
 
 
 def test_phase2_refresh_logs_are_inserted_and_returned_with_latest_run():
