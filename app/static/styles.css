@@ -36,6 +36,77 @@ select {
   display: none !important;
 }
 
+.landing { background: var(--bg); }
+.landing-container { width: min(1180px, calc(100% - 64px)); margin-inline: auto; }
+.landing a, .text-link { color: var(--accent-strong); text-decoration: none; }
+.landing a:hover, .text-link:hover { text-decoration: underline; text-underline-offset: 5px; }
+.landing a:focus-visible, .text-link:focus-visible, .landing summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
+.landing-nav { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 100px; border-bottom: 1px solid var(--line); }
+.landing-brand { display: inline-flex; align-items: center; gap: 6px; color: var(--ink) !important; font-size: 18px; font-weight: 750; letter-spacing: -.6px; }
+.landing-brand > span:last-child { color: var(--accent); }
+.brand-mark { display: inline-grid; place-items: center; width: 34px; height: 34px; margin-right: 5px; border-radius: 9px; background: var(--accent); color: white; font-size: 25px; }
+.landing-nav nav { display: flex; align-items: center; gap: 30px; font-size: 14px; font-weight: 600; }
+.landing .landing-button { display: inline-flex; align-items: center; justify-content: center; gap: 18px; padding: 14px 22px; border-radius: 6px; background: var(--accent); color: white; font-size: 14px; font-weight: 650; text-decoration: none; }
+.landing .landing-button:hover { background: var(--accent-strong); }
+.landing-hero { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 56px; padding: 100px 0 90px; }
+.landing .eyebrow { font-size: 11px; letter-spacing: 1.6px; line-height: 1.6; }
+.landing-hero h1 { margin: 20px 0 24px; font-size: clamp(36px, 4.2vw, 56px); line-height: 1.09; letter-spacing: -2.5px; font-weight: 650; }
+.landing-hero h1 span { color: var(--accent); }
+.hero-description { max-width: 460px; font-size: 17px; line-height: 1.8; color: var(--muted); }
+.hero-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 22px; margin-top: 30px; }
+.hero-actions .text-link { font-size: 14px; font-weight: 600; }
+.hero-note { margin-top: 22px; font-size: 12px; color: var(--muted); }
+.market-preview { min-width: 0; margin: 0; padding: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 60px rgba(4, 92, 102, .09); }
+.preview-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 22px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.preview-brand { font-weight: 750; }
+.preview-label { font-size: 10px; color: var(--muted); }
+.preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; }
+.preview-heading h2 { margin-top: 6px; font-size: 16px; font-weight: 600; }
+.preview-signal { padding: 5px 8px; border-radius: 4px; background: #edf7f6; color: var(--accent-strong); font-size: 10px; }
+.preview-chart { display: block; width: 100%; height: auto; margin: 26px 0; }
+.preview-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.preview-metrics span { display: block; margin-bottom: 7px; font-size: 10px; color: var(--muted); }
+.preview-metrics strong { display: block; font-size: 11px; font-weight: 600; }
+.market-preview figcaption { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.landing-features { padding: 44px 0 60px; border-top: 1px solid var(--line); }
+.landing-section-heading h2, .landing-help h2, .landing-contact h2 { margin-top: 10px; font-size: 29px; font-weight: 600; letter-spacing: -1px; line-height: 1.25; }
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; margin-top: 36px; }
+.feature-grid article + article { padding-left: 30px; border-left: 1px solid var(--line); }
+.feature-number { font-size: 10px; font-weight: 700; letter-spacing: 1.3px; color: var(--accent); }
+.feature-grid h3 { margin: 17px 0 10px; font-size: 18px; font-weight: 600; letter-spacing: -.4px; }
+.feature-grid p, .landing-help p, .landing-contact p { color: var(--muted); font-size: 14px; line-height: 1.8; }
+.landing-help { display: grid; grid-template-columns: 1fr 1.25fr; gap: 60px; padding: 65px 0; border-top: 1px solid var(--line); }
+.landing-faq details { border-bottom: 1px solid var(--line); padding: 18px 0; }
+.landing-faq details:first-child { padding-top: 0; }
+.landing-faq summary { cursor: pointer; font-size: 15px; font-weight: 600; line-height: 1.6; }
+.landing-faq p { margin-bottom: 0; }
+.landing-contact { display: flex; align-items: center; justify-content: space-between; gap: 32px; padding: 36px; margin-bottom: 50px; border: 1px solid #d5e7e7; border-radius: 10px; background: #eef5f5; }
+.landing-contact p { max-width: 550px; margin-bottom: 0; }
+.landing-contact .landing-button { flex-shrink: 0; }
+.landing-footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 26px 0; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.landing-footer p { margin: 0; }
+@media (max-width: 960px) {
+  .landing-hero { gap: 30px; padding: 65px 0; }
+  .landing-hero h1 { letter-spacing: -1.5px; }
+  .preview-heading { align-items: start; flex-direction: column; }
+  .feature-grid { gap: 20px; }
+  .feature-grid article + article { padding-left: 20px; }
+}
+@media (max-width: 700px) {
+  .landing-container { width: calc(100% - 36px); }
+  .landing-nav { flex-wrap: wrap; justify-content: center; padding: 20px 0; gap: 20px; }
+  .landing-nav nav { width: 100%; justify-content: space-between; gap: 14px; }
+  .landing-nav .landing-button { padding: 10px 16px; }
+  .landing-hero, .landing-help { grid-template-columns: 1fr; gap: 36px; padding: 48px 0; }
+  .landing-hero h1 { font-size: clamp(36px, 9vw, 52px); }
+  .hero-description { font-size: 16px; }
+  .market-preview { padding: 20px; }
+  .feature-grid { grid-template-columns: 1fr; gap: 26px; }
+  .feature-grid article + article { border-left: 0; padding-left: 0; }
+  .landing-contact { align-items: flex-start; flex-direction: column; padding: 26px; }
+  .landing-footer { flex-wrap: wrap; }
+}
+
 .login-screen {
   display: grid;
   min-height: 100vh;

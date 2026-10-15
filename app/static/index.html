@@ -7,8 +7,60 @@
     <link rel="stylesheet" href="/static/styles.css?v=__STATIC_VERSION__" />
   </head>
   <body>
+    <div id="landingScreen" class="landing">
+      <header class="landing-nav landing-container">
+        <a class="landing-brand" href="#home" aria-label="Stock Momentum AI home"><span class="brand-mark" aria-hidden="true">↗</span> Stock Momentum <span>AI</span></a>
+        <nav aria-label="Main menu">
+          <a href="#help">Help</a>
+          <a href="#contact">Contact Us</a>
+          <a class="landing-button" href="#login">Sign in <span aria-hidden="true">↗</span></a>
+        </nav>
+      </header>
+      <main id="home" class="landing-container">
+        <section class="landing-hero" aria-labelledby="heroTitle">
+          <div class="hero-copy">
+            <p class="eyebrow">A clearer view of market momentum</p>
+            <h1 id="heroTitle">Find the signal.<br /><span>Focus your research.</span></h1>
+            <p class="hero-description">Discover momentum candidates, spot stretched moves, and follow upcoming catalysts. One focused workspace for your next market idea.</p>
+            <div class="hero-actions"><a class="landing-button" href="#login">Open your dashboard <span aria-hidden="true">→</span></a><a class="text-link" href="#features">Explore the tools <span aria-hidden="true">↓</span></a></div>
+            <p class="hero-note">Less noise. More context. Your research, in focus.</p>
+          </div>
+          <figure class="market-preview" aria-labelledby="previewCaption">
+            <div class="preview-top"><span class="preview-brand">↗ Momentum overview</span><span class="preview-label">Illustrative preview</span></div>
+            <div class="preview-heading"><div><p class="eyebrow">Discovery</p><h2>A trend worth a closer look</h2></div><span class="preview-signal">Momentum</span></div>
+            <svg class="preview-chart" viewBox="0 0 480 200" role="img" aria-label="Illustrative rising price trend with pullbacks, not live market data">
+              <defs><linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#087f8c" stop-opacity=".18"/><stop offset="100%" stop-color="#087f8c" stop-opacity="0"/></linearGradient></defs>
+              <g stroke="#e7ecf0" stroke-dasharray="4 5"><path d="M0 40H480M0 90H480M0 140H480M0 190H480"/></g>
+              <path d="M0 166L25 158L45 168L70 139L95 145L120 116L145 126L170 98L195 110L220 88L245 96L270 67L295 80L320 54L345 66L370 35L395 46L420 22L450 33L480 12V200H0Z" fill="url(#chartFill)"/>
+              <path d="M0 166L25 158L45 168L70 139L95 145L120 116L145 126L170 98L195 110L220 88L245 96L270 67L295 80L320 54L345 66L370 35L395 46L420 22L450 33L480 12" fill="none" stroke="#087f8c" stroke-width="3" stroke-linejoin="round"/>
+            </svg>
+            <div class="preview-metrics"><div><span>Discover</span><strong>Relative strength</strong></div><div><span>Evaluate</span><strong>Price &amp; volume</strong></div><div><span>Track</span><strong>Upcoming events</strong></div></div>
+            <figcaption id="previewCaption">A little perspective. A more focused watchlist.</figcaption>
+          </figure>
+        </section>
+        <section id="features" class="landing-features" aria-labelledby="featuresTitle">
+          <div class="landing-section-heading"><p class="eyebrow">From discovery to context</p><h2 id="featuresTitle">Three views. One research routine.</h2></div>
+          <div class="feature-grid">
+            <article><span class="feature-number">01 / DISCOVER</span><h3>Find emerging strength</h3><p>Explore ranked momentum candidates with growth, volume, and setup context in one view.</p></article>
+            <article><span class="feature-number">02 / EVALUATE</span><h3>Put the move in perspective</h3><p>Review overextended stocks and pullback signals before adding an idea to your watchlist.</p></article>
+            <article><span class="feature-number">03 / FOLLOW</span><h3>Keep catalysts in sight</h3><p>Follow upcoming biotech events with dates, development stages, and supporting sources.</p></article>
+          </div>
+        </section>
+        <section id="help" class="landing-help" aria-labelledby="helpTitle">
+          <div><p class="eyebrow">Help</p><h2 id="helpTitle">A simple place to start.</h2><p>Get to know your research workspace.</p></div>
+          <div class="landing-faq">
+            <details><summary>How do I access the dashboard?</summary><p>Select <a href="#login">Sign in</a> and enter your dashboard password. If you need access, contact the person who manages your dashboard.</p></details>
+            <details><summary>What can I explore?</summary><p>Start with Discovery to review momentum candidates, use Overextended for pullback context, and visit Biotech Catalysts to follow upcoming events.</p></details>
+            <details><summary>Is the preview live market data?</summary><p>No. The chart above is illustrative. Once signed in, check the dashboard's data status and source information when reviewing candidates.</p></details>
+          </div>
+        </section>
+        <section id="contact" class="landing-contact" aria-labelledby="contactTitle"><div><p class="eyebrow">Contact Us</p><h2 id="contactTitle">Have a question or an idea?</h2><p>Share product feedback or report a problem through our project support page. A GitHub account is required to post.</p></div><a class="landing-button" href="https://github.com/phuc-minu/momentum-tracker/issues">Contact the team <span aria-hidden="true">↗</span></a></section>
+      </main>
+      <footer class="landing-footer landing-container"><span>Stock Momentum AI</span><p>Built for research. Not investment advice.</p><a href="#home">Back to top ↑</a></footer>
+    </div>
     <section id="loginScreen" class="login-screen" hidden>
       <form id="loginForm" class="login-panel">
+        <a class="text-link" href="#home">← Back to home</a>
         <p class="eyebrow">Private Dashboard</p>
         <h1>Stock Momentum AI</h1>
         <label class="field">
@@ -18,7 +70,7 @@
         <button id="loginButton" class="primary-button" type="submit">
           <span>Login</span>
         </button>
-        <p id="loginMessage" class="login-message"></p>
+        <p id="loginMessage" class="login-message" role="status"></p>
       </form>
     </section>
 
