@@ -1,0 +1,97 @@
+name: Test and deploy to Azure
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+      - run: python -m pip install -r app/requirements.txt
+      - run: python -m pytest -m 'not live_site' -q
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: azure-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CORE_OUTPUT: none
+      RESOURCE_GROUP: rg-tech-momentum-ai
+      CONTAINER_APP: momentumai-api
+      ACR_NAME: momentumairkdchlu5eqdos
+      ACR_SERVER: momentumairkdchlu5eqdos.azurecr.io
+      IMAGE: momentumairkdchlu5eqdos.azurecr.io/tech-momentum-ai:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ignore superseded commits
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if [[ "$GITHUB_SHA" == "$(git rev-parse origin/main)" ]]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Superseded by a newer main commit; skipping deployment.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Sign in to Azure using OIDC
+        if: steps.current.outputs.deploy == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and push image
+        if: steps.current.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az acr login --name "$ACR_NAME"
+          docker build --pull --tag "$IMAGE" app
+          docker push "$IMAGE"
+      - name: Deploy and verify
+        if: steps.current.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          az extension add --name containerapp --upgrade --yes
+          mode=$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP" --query properties.configuration.activeRevisionsMode -o tsv)
+          [[ "$mode" == 'Single' ]] || { echo 'Expected Single revision mode; configure traffic routing before deploying.' >&2; exit 1; }
+          revision=$(az containerapp update -g "$RESOURCE_GROUP" -n "$CONTAINER_APP" --image "$IMAGE" --query properties.latestRevisionName -o tsv)
+          [[ -n "$revision" ]] || { echo 'No revision returned.' >&2; exit 1; }
+          ready=false
+          for attempt in {1..60}; do
+            active=$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP" --query properties.latestReadyRevisionName -o tsv)
+            if [[ "$active" == "$revision" ]]; then ready=true; break; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo "Revision $revision did not become ready." >&2; exit 1; }
+          fqdn=$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP" --query properties.configuration.ingress.fqdn -o tsv)
+          curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 10 --max-time 30 "https://$fqdn/health" | python -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") == "ok", data'
+          printf '### Azure deployment succeeded\n\nImage: `%s`\n\nRevision: `%s`\n\nURL: https://%s\n' "$IMAGE" "$revision" "$fqdn" >> "$GITHUB_STEP_SUMMARY"
+      - name: Clear registry credentials
+        if: always() && steps.current.outputs.deploy == 'true'
+        run: docker logout "$ACR_SERVER"

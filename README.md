@@ -10,6 +10,21 @@ This is the Azure deployment scaffold for a momentum-first investing agent.
 - Momentum score, grade, and setup classification for breakout, pullback, extended, base, or weak charts
 - Optional benchmark-relative 3-month strength and explainable scoring factors
 
+## GitHub Actions deployment
+
+`.github/workflows/azure-deploy.yml` runs the offline Python tests on pull requests and pushes to `main`. A successful push to `main` (including a merged PR) builds a new Docker image, pushes it to the existing Azure Container Registry, and updates `momentumai-api`. Manual runs deploy only when the selected branch is `main`.
+
+One-time setup by a repository/Azure administrator:
+
+1. Create a dedicated Microsoft Entra application/service principal for GitHub deployment. Add a federated credential with issuer `https://token.actions.githubusercontent.com`, subject `repo:phuc-minu/momentum-tracker:ref:refs/heads/main`, and audience `api://AzureADTokenExchange`. No client secret is needed.
+2. Give that principal `AcrPush` on registry `momentumairkdchlu5eqdos` and `Container Apps Contributor` on the existing `momentumai-api` resource in `rg-tech-momentum-ai`. The app's existing managed identity continues to pull images and access Key Vault.
+3. Add repository Actions secrets `AZURE_CLIENT_ID` (the application's client ID), `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`. Do not add market-data, database, or application passwords to GitHub; the running app keeps its existing secrets and environment settings.
+4. Merge the workflow into `main`, then inspect **Actions → Test and deploy to Azure**. The deployment summary contains the image tag, revision, and application URL.
+
+Deployments are serialized without cancelling an active rollout. Queued commits superseded by a newer `main` commit are skipped to prevent an older build replacing a newer deployment. Image tags include commit, run ID, and attempt so reruns never overwrite an earlier image. The workflow requires single-revision mode, waits for the new revision to become ready, and checks `/health`; failures stop the run. It does not provision infrastructure, change secrets, or update/run the scheduled database-refresh job. To roll back, update the Container App to a previous successful image shown in an Actions summary, or revert the commit on `main` to build and deploy the reverted source.
+
+OIDC setup: [Azure Login documentation](https://github.com/Azure/login#login-with-openid-connect-oidc-recommended).
+
 ## Run locally
 
 ```powershell
