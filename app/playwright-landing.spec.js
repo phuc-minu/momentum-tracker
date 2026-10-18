@@ -64,12 +64,13 @@ test("Sector / Exchange sorts displayed labels and preserves score ties", async 
     { symbol: "NYSE", sector: "Unclassified", exchange: "N", score: 90 },
     { symbol: "LOW", sector: "healthcare", score: 70 },
     { symbol: "HIGH", sector: "Healthcare", score: 80 },
-    { symbol: "NAS", sector: null, exchange: "NASDAQ", score: 85 },
+    { symbol: "NAS", sector: null, exchange: "NASDAQ", score: 92 },
   ].map(item => ({ ...item, last_close: 20, factors: { return_1m: 0.5 } }));
   await page.route("**/phase2/candidates?*", route => route.fulfill({ json: { results } }));
   await page.goto("/");
   const symbols = page.locator("#discoverBody .symbol-link");
-  await expect(symbols).toHaveText(["TECH", "NYSE", "NAS", "HIGH", "LOW"]);
+  // Keep default score order distinct from descending sector/exchange order.
+  await expect(symbols).toHaveText(["TECH", "NAS", "NYSE", "HIGH", "LOW"]);
   const sort = page.getByRole("button", { name: "Sector / Exchange", exact: true });
   const header = sort.locator("..");
   await sort.click();
