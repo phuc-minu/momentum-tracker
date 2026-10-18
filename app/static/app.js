@@ -49,6 +49,7 @@ const DEFAULT_BIOTECH_EVENTS = [
 
 const DISCOVERY_SORT_CONFIG = {
   symbol: { type: "text", direction: "asc", value: (item) => item.symbol },
+  sector: { type: "text", direction: "asc", value: (item) => item.market_group || item.sector || "Unclassified" },
   price: { type: "number", direction: "desc", value: (item) => item.last_close },
   rsi: { type: "number", direction: "desc", value: (item) => item.rsi_14 },
   score: { type: "number", direction: "desc", value: (item) => item.momentum_score },

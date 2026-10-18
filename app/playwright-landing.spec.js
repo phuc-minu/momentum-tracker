@@ -54,3 +54,37 @@ for (const width of [375, 768, 1440]) {
     await expect(page.locator("#landingScreen")).toBeVisible();
   });
 }
+
+test("Sector / Exchange sorts displayed labels and preserves score ties", async ({ page }) => {
+  await page.route("**/auth/status", route => route.fulfill({ json: { authenticated: true } }));
+  await page.route("**/health", route => route.fulfill({ json: { status: "ok", fmp_configured: false } }));
+  await page.route("**/phase2/**", route => route.fulfill({ json: { results: [] } }));
+  const results = [
+    { symbol: "TECH", sector: "Technology", score: 95 },
+    { symbol: "NYSE", sector: "Unclassified", exchange: "N", score: 90 },
+    { symbol: "LOW", sector: "healthcare", score: 70 },
+    { symbol: "HIGH", sector: "Healthcare", score: 80 },
+    { symbol: "NAS", sector: null, exchange: "NASDAQ", score: 85 },
+  ].map(item => ({ ...item, last_close: 20, factors: { return_1m: 0.5 } }));
+  await page.route("**/phase2/candidates?*", route => route.fulfill({ json: { results } }));
+  await page.goto("/");
+  const symbols = page.locator("#discoverBody .symbol-link");
+  await expect(symbols).toHaveText(["TECH", "NYSE", "NAS", "HIGH", "LOW"]);
+  const sort = page.getByRole("button", { name: "Sector / Exchange", exact: true });
+  const header = sort.locator("..");
+  await sort.click();
+  await expect(symbols).toHaveText(["HIGH", "LOW", "NAS", "NYSE", "TECH"]);
+  await expect(header).toHaveAttribute("aria-sort", "ascending");
+  await expect(sort).toHaveClass(/active/);
+  await expect(sort.locator(".sort-indicator")).toHaveText("↑");
+  await expect(page.locator('[data-sort-key="score"]').locator("..")).not.toHaveAttribute("aria-sort");
+  await sort.press("Enter");
+  await expect(symbols).toHaveText(["TECH", "NYSE", "NAS", "HIGH", "LOW"]);
+  await expect(header).toHaveAttribute("aria-sort", "descending");
+  await expect(sort.locator(".sort-indicator")).toHaveText("↓");
+  await page.getByRole("button", { name: "Symbol", exact: true }).click();
+  await expect(header).not.toHaveAttribute("aria-sort");
+  await expect(sort.locator(".sort-indicator")).toHaveText("↕");
+  await sort.click();
+  await expect(symbols).toHaveText(["HIGH", "LOW", "NAS", "NYSE", "TECH"]);
+});
