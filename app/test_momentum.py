@@ -1,6 +1,10 @@
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+
+import httpx
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +16,8 @@ from options_activity import analyze_options_activity
 from phase2_refresh import (
     _apply_stored_candle_fallback,
     _calendar_day_return,
+    _fetch_symbol_candles_with_retry,
+    _unresolved_candles_log,
     _earnings_metadata_for_symbol,
     _filter_symbols_by_average_volume,
     _filter_symbols_by_price_movement,
@@ -489,6 +495,7 @@ def test_phase2_prefilter_keeps_top_price_movers(monkeypatch):
 
 
 def test_phase2_prefilter_uses_stored_bars_for_provider_misses(monkeypatch):
+    monkeypatch.setenv("PHASE2_FMP_RETRY_BACKOFF_SECONDS", "0")
     class FakeClient:
         def __init__(self, *args, **kwargs):
             self.api_key = "test-token"
@@ -614,6 +621,38 @@ def test_phase2_refresh_rejects_stale_stored_bars(monkeypatch):
 
     assert unresolved == ["MRNA"]
     assert "MRNA" not in candle_map
+
+
+def test_phase2_candle_retry_logs_final_failure(caplog):
+    calls = []
+
+    class FailingClient:
+        async def candles(self, symbol, *, countback):
+            calls.append(symbol)
+            raise FmpError("FMP rate limit reached.")
+
+    with caplog.at_level("WARNING", logger="phase2_refresh"):
+        candles = asyncio.run(
+            _fetch_symbol_candles_with_retry(FailingClient(), "MRNA", countback=60, attempts=3, backoff_seconds=0)
+        )
+
+    assert candles == []
+    assert calls == ["MRNA", "MRNA", "MRNA"]
+    assert "FMP candles failed for MRNA after 3 attempts: FMP rate limit reached." in caplog.text
+
+
+def test_phase2_skips_symbols_without_candles_below_missing_ratio():
+    log = _unresolved_candles_log(["MRNA", "GME"], symbols_requested=50, max_missing_ratio=0.5)
+
+    assert log["level"] == "warning"
+    assert log["source"] == "fmp.candles"
+    assert log["message"].startswith("Skipped 2 of 50 symbols")
+    assert json.loads(log["details"])["unresolved_symbols"] == ["MRNA", "GME"]
+
+
+def test_phase2_fails_when_too_many_symbols_lack_candles():
+    with pytest.raises(FmpError, match="No complete candle history available for"):
+        _unresolved_candles_log([f"S{i}" for i in range(26)], symbols_requested=50, max_missing_ratio=0.5)
 
 
 def test_phase2_selects_top_30_day_price_movers_before_scoring():
@@ -1140,6 +1179,25 @@ def test_option_chain_normalizes_configured_row_provider(monkeypatch):
     assert rows[0]["optionSymbol"] == "AAPL260828C00300000"
     assert rows[0]["mid"] == 5.2
     assert rows[1]["side"] == "put"
+
+
+def test_option_chain_404_with_list_body_raises_fmp_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("FMP_OPTIONS_CHAIN_PATH", "options-chain")
+    monkeypatch.setenv("FMP_POSITIONS_SUMMARY_ENABLED", "false")
+    client = FmpClient(api_key="test-token", cache=FmpCache(tmp_path))
+
+    def handler(request):
+        return httpx.Response(404, json=[])
+
+    real_async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+
+    with pytest.raises(FmpError, match="HTTP 404"):
+        asyncio.run(client.option_chain("DOCS"))
 
 
 def test_option_chain_uses_fmp_positions_summary(monkeypatch):

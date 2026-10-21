@@ -545,6 +545,9 @@ def _provider_error_message(response: httpx.Response) -> str:
         payload = response.json()
     except ValueError:
         return ""
+    # FMP returns a bare JSON list (e.g. []) on some 404s, such as symbols without options.
+    if not isinstance(payload, dict):
+        return ""
     message = payload.get("errmsg") or payload.get("message")
     return str(message) if message else ""
 
