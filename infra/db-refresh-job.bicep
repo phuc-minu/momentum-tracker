@@ -21,6 +21,9 @@ param identityId string
 @description('Key Vault containing the database and provider secrets.')
 param keyVaultName string
 
+@description('Optional FMP-compatible options-chain endpoint path, for example options-chain.')
+param fmpOptionsChainPath string = ''
+
 var databaseSecret = {
   name: 'database-url'
   keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/database-url'
@@ -127,6 +130,12 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = {
               name: 'FMP_POSITIONS_SUMMARY_ENABLED'
               value: 'false'
             }
+            ...empty(fmpOptionsChainPath) ? [] : [
+              {
+                name: 'FMP_OPTIONS_CHAIN_PATH'
+                value: fmpOptionsChainPath
+              }
+            ]
           ]
           resources: {
             cpu: json('0.5')

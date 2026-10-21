@@ -49,6 +49,10 @@ az containerapp registry set -n "$app" -g "$RESOURCE_GROUP" --server "$acr_login
 secret_args=()
 env_args=()
 
+if [[ -n "${FMP_OPTIONS_CHAIN_PATH:-}" ]]; then
+  env_args+=("FMP_OPTIONS_CHAIN_PATH=$FMP_OPTIONS_CHAIN_PATH")
+fi
+
 add_secret_env_if_present() {
   local secret_name="$1"
   local env_name="$2"

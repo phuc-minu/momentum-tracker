@@ -50,6 +50,7 @@ const DEFAULT_BIOTECH_EVENTS = [
 const DISCOVERY_SORT_CONFIG = {
   rank: { type: "number", direction: "asc", value: (item) => item.discovery_rank },
   symbol: { type: "text", direction: "asc", value: (item) => item.symbol },
+  sector: { type: "text", direction: "asc", value: (item) => item.market_group || item.sector || "Unclassified" },
   price: { type: "number", direction: "desc", value: (item) => item.last_close },
   rsi: { type: "number", direction: "desc", value: (item) => item.rsi_14 },
   score: { type: "number", direction: "desc", value: (item) => item.momentum_score },
@@ -59,6 +60,7 @@ const DISCOVERY_SORT_CONFIG = {
 };
 
 const elements = {
+  landingScreen: document.querySelector("#landingScreen"),
   loginScreen: document.querySelector("#loginScreen"),
   loginForm: document.querySelector("#loginForm"),
   passwordInput: document.querySelector("#passwordInput"),
@@ -90,6 +92,10 @@ class AuthRequiredError extends Error {}
 const DEFAULT_BUTTON_LABELS = new WeakMap();
 
 elements.loginForm.addEventListener("submit", login);
+window.addEventListener("hashchange", () => {
+  if (!elements.dashboard.hidden) return;
+  showPublicPage();
+});
 elements.logoutButton.addEventListener("click", logout);
 elements.discoverButton.addEventListener("click", runDiscover);
 elements.tabButtons.forEach((button) => {
@@ -136,7 +142,7 @@ async function checkAuth() {
       showDashboard();
       await loadDashboard();
     } else {
-      showLogin();
+      showPublicPage();
     }
   } catch {
     showLogin("Unable to check login status.");
@@ -174,6 +180,8 @@ async function logout() {
 }
 
 function showLogin(message = "") {
+  history.replaceState(null, "", "#login");
+  elements.landingScreen.hidden = true;
   elements.dashboard.hidden = true;
   elements.loginScreen.hidden = false;
   elements.loginMessage.textContent = message;
@@ -182,8 +190,22 @@ function showLogin(message = "") {
 }
 
 function showDashboard() {
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+  elements.landingScreen.hidden = true;
   elements.loginScreen.hidden = true;
   elements.dashboard.hidden = false;
+}
+
+function showPublicPage() {
+  if (window.location.hash === "#login") {
+    showLogin();
+    return;
+  }
+  elements.loginScreen.hidden = true;
+  elements.dashboard.hidden = true;
+  elements.landingScreen.hidden = false;
+  const target = document.getElementById(window.location.hash.slice(1));
+  if (target && elements.landingScreen.contains(target)) target.scrollIntoView();
 }
 
 async function runDiscover() {

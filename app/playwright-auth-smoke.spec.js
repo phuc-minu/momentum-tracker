@@ -7,6 +7,7 @@ test("authenticated dashboard smoke test", async ({ page }) => {
   expect(password, "APP_PASSWORD must be set in the environment").toBeTruthy();
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: "Sign in", exact: false }).first().click();
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Login" }).click();
   await expect(page.locator("#dashboard")).toBeVisible({ timeout: 30000 });

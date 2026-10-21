@@ -75,15 +75,6 @@ create table if not exists option_scores (
   scored_at timestamptz not null default now()
 );
 
--- Recover only a price recorded in the same transaction as the first appearance.
--- A later score is not evidence of the original entry price.
-update symbols s
-set first_listed_price = m.last_close
-from momentum_scores m
-where m.symbol = s.symbol
-  and s.first_listed_price is null
-  and s.first_listed_at = m.scored_at;
-
 create index if not exists idx_daily_bars_symbol_date on daily_bars(symbol, bar_date desc);
 create index if not exists idx_momentum_scores_score on momentum_scores(score desc);
 create index if not exists idx_option_scores_score on option_scores(options_confirmation_score desc nulls last);
@@ -294,7 +285,7 @@ def upsert_momentum_scores(connection, run_id: int, scores: list[dict[str, Any]]
         cursor.execute(
             """
             update symbols s
-            set first_listed_at = now(), first_listed_price = m.last_close
+            set first_listed_at = m.scored_at, first_listed_price = m.last_close
             from momentum_scores m
             where m.symbol = s.symbol
               and s.symbol = any(%s) and s.first_listed_at is null
