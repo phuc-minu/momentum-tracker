@@ -102,11 +102,12 @@ async def main() -> None:
                 countback=args.countback,
             )
             if unresolved_symbols:
-                raise FmpError(
-                    "No complete candle history available for "
-                    f"{', '.join(unresolved_symbols[:20])}"
-                    + (f" and {len(unresolved_symbols) - 20} more" if len(unresolved_symbols) > 20 else "")
+                log = _unresolved_candles_log(
+                    unresolved_symbols,
+                    symbols_requested=len(symbols),
+                    max_missing_ratio=float(os.getenv("PHASE2_MAX_MISSING_CANDLE_RATIO", "0.5")),
                 )
+                insert_refresh_log(connection, run_id, **log)
 
             benchmark_candles = candle_map.get(benchmark) if benchmark else []
             if benchmark and not benchmark_candles:
@@ -354,16 +355,19 @@ async def _fetch_symbol_candles_with_retry(
     symbol: str,
     *,
     countback: int,
-    attempts: int = 2,
+    attempts: int | None = None,
+    backoff_seconds: float | None = None,
 ) -> list:
-    total_attempts = max(1, attempts)
+    total_attempts = max(1, attempts if attempts is not None else int(os.getenv("PHASE2_FMP_RETRY_ATTEMPTS", "3")))
+    backoff = backoff_seconds if backoff_seconds is not None else float(os.getenv("PHASE2_FMP_RETRY_BACKOFF_SECONDS", "5"))
     for attempt in range(total_attempts):
         try:
             return await client.candles(symbol, countback=countback)
-        except FmpError:
+        except FmpError as error:
             if attempt == total_attempts - 1:
+                LOGGER.warning("FMP candles failed for %s after %s attempts: %s", symbol, total_attempts, error)
                 return []
-            await asyncio.sleep(0.5 * (attempt + 1))
+            await asyncio.sleep(backoff * (attempt + 1))
     return []
 
 
@@ -392,6 +396,34 @@ def _apply_stored_candle_fallback(
             continue
         candle_map[symbol] = candles[-countback:]
     return unresolved_symbols
+
+
+def _unresolved_candles_log(
+    unresolved_symbols: list[str],
+    *,
+    symbols_requested: int,
+    max_missing_ratio: float,
+) -> dict[str, Any]:
+    summary = ", ".join(unresolved_symbols[:20]) + (
+        f" and {len(unresolved_symbols) - 20} more" if len(unresolved_symbols) > 20 else ""
+    )
+    if len(unresolved_symbols) > symbols_requested * max_missing_ratio:
+        raise FmpError(f"No complete candle history available for {summary}")
+    message = f"Skipped {len(unresolved_symbols)} of {symbols_requested} symbols without complete candle history: {summary}"
+    LOGGER.warning(message)
+    return {
+        "level": "warning",
+        "source": "fmp.candles",
+        "message": message,
+        "details": json.dumps(
+            {
+                "unresolved_symbols": unresolved_symbols,
+                "symbols_requested": symbols_requested,
+                "max_missing_ratio": max_missing_ratio,
+            },
+            separators=(",", ":"),
+        ),
+    }
 
 
 def _select_top_price_mover_symbols(
