@@ -1,6 +1,7 @@
 const state = {
   liveDataAvailable: false,
   discoveryRows: [],
+  expandedDiscoverySymbols: new Set(),
   overextendedRows: [],
   biotechEvents: [],
   discoverySort: { key: "score", direction: "desc" },
@@ -103,6 +104,18 @@ elements.tabButtons.forEach((button) => {
 });
 elements.discoverySortButtons.forEach((button) => {
   button.addEventListener("click", () => setDiscoverySort(button.dataset.sortKey));
+});
+elements.discoverBody.addEventListener("click", (event) => {
+  const toggle = event.target.closest(".row-toggle");
+  if (!toggle || !elements.discoverBody.contains(toggle)) return;
+  const symbol = toggle.dataset.symbol;
+  if (state.expandedDiscoverySymbols.has(symbol)) state.expandedDiscoverySymbols.delete(symbol);
+  else state.expandedDiscoverySymbols.add(symbol);
+  const expanded = state.expandedDiscoverySymbols.has(symbol);
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-label", `${expanded ? "Hide" : "Show"} details for ${symbol}`);
+  const details = document.getElementById(toggle.getAttribute("aria-controls"));
+  if (details) details.hidden = !expanded;
 });
 elements.periodInput.addEventListener("change", () => updateGrowthColumnHeader());
 updateDiscoverySortIndicators();
@@ -464,20 +477,25 @@ function renderDiscoveryRows(rows) {
 
 function renderDiscoveryEmpty(message) {
   state.discoveryRows = [];
-  elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="12">${message}</td></tr>`;
+  elements.discoverBody.innerHTML = `<tr><td class="empty-state" colspan="13">${escapeHtml(message)}</td></tr>`;
 }
 
 function renderSortedDiscoveryRows() {
   elements.discoverBody.innerHTML = [...state.discoveryRows]
     .sort(compareDiscoveryRows)
-    .map((item) => {
+    .map((item, index) => {
+      const symbol = String(item.symbol);
+      const safeId = `details-${symbol.replace(/[^A-Za-z0-9_-]/g, "-")}-${index}`;
+      const expanded = state.expandedDiscoverySymbols.has(symbol);
+      const score = Number.isFinite(Number(item.momentum_score)) ? scoreHint(item) : "Momentum score unavailable.";
       return `
-        <tr>
+        <tr class="discover-row">
+          <td class="col-toggle-cell"><button class="row-toggle" type="button" data-symbol="${escapeAttribute(symbol)}" aria-expanded="${expanded}" aria-controls="${safeId}" aria-label="${expanded ? "Hide" : "Show"} details for ${escapeAttribute(symbol)}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 6 5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button></td>
           <td>${item.discovery_rank}</td>
-          <td><a class="symbol-link" href="${yahooFinanceUrl(item.symbol)}" target="_blank" rel="noopener noreferrer">${item.symbol}</a></td>
+          <td><a class="symbol-link" href="${yahooFinanceUrl(symbol)}" target="_blank" rel="noopener noreferrer">${escapeHtml(symbol)}</a></td>
           <td>${formatPrice(item.last_close)}</td>
           <td>${formatRsi(item.rsi_14)}</td>
-          <td><strong title="${escapeAttribute(scoreHint(item))}" aria-label="${escapeAttribute(scoreHint(item))}">${item.momentum_score.toFixed(1)}</strong></td>
+          <td><strong title="${escapeAttribute(score)}" aria-label="${escapeAttribute(score)}">${Number(item.momentum_score).toFixed(1)}</strong></td>
           <td><span class="sector-pill">${item.market_group || item.sector || "Unclassified"}</span></td>
           <td>${formatPercent(item.return_2w)}</td>
           <td>${formatSignal(item.price_signal)}</td>
@@ -489,9 +507,32 @@ ${/* Options columns paused; restore this template when an endpoint is available
           <td>${formatPrice(item.first_listed_price)}</td>
           <td class="catalyst-cell">${formatCatalystSetup(item)}</td>
         </tr>
+        <tr class="row-details" id="${safeId}"${expanded ? "" : " hidden"}><td colspan="13">${renderDiscoveryDetails(item)}</td></tr>
       `;
     })
     .join("");
+}
+
+function detailValue(value) {
+  return value === null || value === undefined || value === "" ? "—" : escapeHtml(value);
+}
+
+function formattedDetail(formatter, value) {
+  return value === null || value === undefined ? "—" : formatter(value);
+}
+
+function renderDiscoveryDetails(item) {
+  const factors = item.factors || {};
+  const factorRows = [
+    ["1M return", formattedDetail(formatPercent, item.return_1m)],
+    ["RSI (14)", formattedDetail(formatRsi, factors.rsi_14)],
+    ["Distance to 50D SMA", formattedDetail(formatPercent, factors.distance_to_50d_sma)],
+    ["Distance to 20D high", formattedDetail(formatPercent, factors.distance_to_20d_high)],
+    ["Current / 20D volume", formattedDetail(formatRatio, item.volume_ratio_20d)],
+  ].map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("");
+  const score = Number.isFinite(Number(item.momentum_score)) ? scoreHint(item) : "Momentum score unavailable.";
+  const setup = item.setup ? escapeHtml(formatSetup(item.setup)) : "—";
+  return `<div class="discovery-details"><div><h3>Score breakdown</h3><p>${escapeHtml(score)}</p><h3>Catalyst setup</h3><p>${detailValue(item.catalyst)}</p><p>Setup: ${setup}</p><p>Earnings checked: ${item.earnings_checked ? "Yes" : "No"}; near move: ${item.earnings_near_move ? "Yes" : "No"}; likely earnings-related: ${item.likely_earnings_related ? "Yes" : "No"}</p></div><div><h3>Key factors</h3><dl>${factorRows}</dl><h3>Chart</h3><div class="mini-chart-placeholder">Mini chart coming soon</div></div></div>`;
 }
 
 function phase2ToDiscoveryRow(item, periodDays) {
