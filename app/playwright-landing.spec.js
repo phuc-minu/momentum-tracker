@@ -40,6 +40,65 @@ test("landing navigation, login, session restoration and logout", async ({ page 
   await page.goto("/#login");
   await expect(page.locator("#loginScreen")).toBeVisible();
 });
+test("Discover accordion details are accessible, sortable, and responsive", async ({ page, context }) => {
+  await page.route("**/auth/status", route => route.fulfill({ json: { authenticated: true } }));
+  await page.route("**/health", route => route.fulfill({ json: { status: "ok", fmp_configured: false } }));
+  await page.route("**/phase2/**", route => route.fulfill({ json: { results: [] } }));
+  await context.route("https://finance.yahoo.com/**", route => route.fulfill({ status: 200, contentType: "text/html", body: "<title>Yahoo stub</title>" }));
+  const results = [
+    { symbol: "ZZZ", sector: "Technology", score: 95, setup: "Breakout", catalyst: "Product launch", last_close: 20, factors: { return_1m: 0.12, return_2w: 0.05, rsi_14: 61, distance_to_50d_sma: 0.03 } },
+    { symbol: "AAA", sector: "Healthcare", score: 80, setup: "Reversal", last_close: 10, factors: { return_1m: 0.08, return_2w: 0.04, rsi_14: 55 } },
+    { symbol: "MMM", sector: "Energy", score: 70, last_close: 8, factors: { return_1m: 0.06 } },
+  ];
+  await page.route("**/phase2/candidates?*", route => route.fulfill({ json: { results, growth_min: 0, period_days: 30, limit: 10 } }));
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.goto("/");
+  const toggles = page.locator("#discoverBody .row-toggle");
+  await expect(toggles).toHaveCount(3);
+  for (const symbol of ["ZZZ", "AAA", "MMM"]) {
+    const toggle = page.getByRole("button", { name: `Show details for ${symbol}` });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const detailsId = await toggle.getAttribute("aria-controls");
+    await expect(page.locator(`#${detailsId}.row-details`)).toBeHidden();
+  }
+  const zzzToggle = page.locator('.row-toggle[data-symbol="ZZZ"]');
+  await zzzToggle.click();
+  await expect(zzzToggle).toHaveAttribute("aria-expanded", "true");
+  const zzzPanel = page.locator(`#${await zzzToggle.getAttribute("aria-controls")}`);
+  await expect(zzzPanel).toBeVisible();
+  await expect(zzzPanel).toContainText("Score breakdown");
+  await expect(zzzPanel).toContainText("Breakout");
+  await expect(zzzPanel).toContainText("1M return");
+  await zzzToggle.click();
+  await expect(zzzPanel).toBeHidden();
+  await zzzToggle.press("Enter");
+  await expect(zzzToggle).toHaveAttribute("aria-expanded", "true");
+  await zzzToggle.press(" ");
+  await expect(zzzToggle).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "Show details for ZZZ" }).click();
+  await page.getByRole("button", { name: "Show details for AAA" }).click();
+  await expect(page.getByRole("button", { name: "Hide details for ZZZ" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Hide details for AAA" })).toHaveCount(1);
+  const missingToggle = page.locator('.row-toggle[data-symbol="MMM"]');
+  await missingToggle.click();
+  await expect(page.locator(`#${await missingToggle.getAttribute("aria-controls")}`)).toContainText("Setup: —");
+  const symbolLink = page.locator(".symbol-link").filter({ hasText: "ZZZ" });
+  await expect(symbolLink).toHaveAttribute("href", "https://finance.yahoo.com/quote/ZZZ");
+  await expect(symbolLink).toHaveAttribute("target", "_blank");
+  const [popup] = await Promise.all([page.waitForEvent("popup"), symbolLink.click()]);
+  await popup.close();
+  await expect(page.getByRole("button", { name: "Hide details for ZZZ" })).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("button", { name: "Symbol", exact: true }).click();
+  await expect(page.locator("#discoverBody .symbol-link")).toHaveText(["AAA", "MMM", "ZZZ"]);
+  for (const symbol of ["ZZZ", "AAA", "MMM"]) {
+    const toggle = page.getByRole("button", { name: new RegExp(`details for ${symbol}$`) });
+    const detailsId = await toggle.getAttribute("aria-controls");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(`#${detailsId}`)).toBeVisible();
+    await expect(toggle.locator("xpath=../..").locator("xpath=following-sibling::tr[1]")).toHaveAttribute("id", detailsId);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
 
 for (const width of [375, 768, 1440]) {
   test(`landing fits a ${width}px viewport`, async ({ page }) => {

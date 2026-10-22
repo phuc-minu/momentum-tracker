@@ -547,6 +547,8 @@ table {
   width: 54px;
 }
 
+.discover-table .col-toggle { width: 44px; }
+
 .overextended-table .col-rank {
   width: 54px;
 }
@@ -690,14 +692,29 @@ td {
   line-height: 1.35;
 }
 
-.discover-table td:nth-child(2),
-.discover-table td:nth-child(3),
-.discover-table td:nth-child(4),
-.discover-table td:nth-child(5),
-.discover-table td:nth-child(7),
-.discover-table td:nth-child(9) {
+.discover-row td:nth-child(3),
+.discover-row td:nth-child(4),
+.discover-row td:nth-child(5),
+.discover-row td:nth-child(6),
+.discover-row td:nth-child(8),
+.discover-row td:nth-child(10) {
   white-space: nowrap;
 }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.row-toggle { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.row-toggle:hover { background: var(--surface-strong); color: var(--text); }
+.row-toggle:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.row-toggle svg { width: 16px; height: 16px; transition: transform 200ms ease; }
+.row-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.row-details > td { padding: 16px 20px; white-space: normal !important; overflow-wrap: anywhere; }
+.discovery-details { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(240px, 1fr); gap: 24px; }
+.discovery-details h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+.discovery-details p { margin: 0 0 12px; white-space: normal; overflow-wrap: anywhere; }
+.discovery-details dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin: 0 0 16px; }
+.discovery-details dt { color: var(--muted); font-size: 12px; }
+.discovery-details dd { margin: 2px 0 0; }
+.mini-chart-placeholder { min-height: 64px; display: grid; place-items: center; border: 1px dashed var(--line); color: var(--muted); white-space: normal; }
 
 th {
   background: var(--surface-strong);
@@ -940,6 +957,12 @@ tbody tr:hover {
   .status-dot.loading {
     animation: none;
   }
+  .row-toggle svg { transition: none; }
+}
+
+@media (max-width: 700px) {
+  .discovery-details { grid-template-columns: 1fr; gap: 14px; }
+  .discovery-details dl { grid-template-columns: 1fr; }
 }
 
 .discover-table .col-date-added {

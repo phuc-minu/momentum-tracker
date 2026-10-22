@@ -28,6 +28,8 @@ def test_dashboard_shell_and_static_assets_are_served_with_no_cache_headers():
     assert "Pullback Watch" in html
     assert "Biotech Catalysts" in html
     assert "Future Event Tracker" in html
+    assert '<col class="col-toggle" />' in html
+    assert '<th class="col-toggle-header"><span class="sr-only">Details</span></th>' in html
 
     asset_paths = re.findall(r'(?:href|src)="([^"]*/static/[^"]+)"', html)
     assert sorted(asset_paths) == [
@@ -58,6 +60,8 @@ def test_dashboard_markup_satisfies_javascript_dom_contract():
 
     sort_keys = set(re.findall(r'data-sort-key="([^"]+)"', html))
     assert sort_keys == {"rank", "symbol", "sector", "price", "rsi", "score", "growth", "volume", "options"}
+    assert 'aria-expanded' in javascript
+    assert 'aria-controls' in javascript
 
 
 def test_auth_flow_protects_dashboard_data_apis(monkeypatch):
