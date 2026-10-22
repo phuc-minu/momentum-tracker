@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import math
@@ -214,13 +215,20 @@ class FmpClient:
         return f"{self.base_url}{path.lstrip('/')}"
 
     async def _latest_quotes_as_candles(self, symbols: list[str]) -> dict[str, Candle]:
+        # The stable quote endpoint accepts one symbol and returns [] for a comma list;
+        # batch-quote is not available on every plan.
+        semaphore = asyncio.Semaphore(_quote_concurrency())
+
+        async def fetch(symbol: str) -> Any:
+            async with semaphore:
+                return await self._get(
+                    self._url("quote"),
+                    {"symbol": symbol},
+                    cache_ttl_seconds=_cache_ttl("FMP_LATEST_CACHE_SECONDS", 300),
+                )
+
         candles = {}
-        for batch in _chunks(symbols, int(os.getenv("FMP_QUOTE_BATCH_SIZE", "100"))):
-            payload = await self._get(
-                self._url("quote"),
-                {"symbol": ",".join(batch)},
-                cache_ttl_seconds=_cache_ttl("FMP_LATEST_CACHE_SECONDS", 300),
-            )
+        for payload in await asyncio.gather(*(fetch(symbol) for symbol in symbols)):
             for row in _as_rows(payload):
                 candle = _fmp_quote_to_candle(row)
                 if candle:
@@ -316,10 +324,11 @@ def _from_date_for_countback(countback: int) -> str:
     return (datetime.now(UTC).date() - timedelta(days=calendar_days)).isoformat()
 
 
-def _chunks(items: list[str], size: int):
-    size = max(1, size)
-    for index in range(0, len(items), size):
-        yield items[index : index + size]
+def _quote_concurrency() -> int:
+    try:
+        return max(1, min(int(os.getenv("FMP_CONCURRENCY", "2")), 5))
+    except ValueError:
+        return 2
 
 
 def _as_rows(payload: Any) -> list[dict]:

@@ -1119,6 +1119,22 @@ def test_bulk_candles_uses_fmp_quote_batches(monkeypatch):
     assert captured["cache_ttl_seconds"] == 300
 
 
+def test_bulk_candles_requests_one_quote_per_symbol(monkeypatch):
+    requested = []
+    client = FmpClient(api_key="test-token")
+
+    async def fake_get(url, params, *, cache_ttl_seconds=300):
+        requested.append(params["symbol"])
+        return [{"symbol": params["symbol"], "timestamp": 1, "price": 10.5, "volume": 1000}]
+
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    candles = asyncio.run(client.bulk_candles(["AAPL", "MSFT", "NVDA"]))
+
+    assert sorted(requested) == ["AAPL", "MSFT", "NVDA"]
+    assert sorted(candles) == ["AAPL", "MSFT", "NVDA"]
+
+
 def test_historical_bulk_candles_uses_fmp_eod_date(monkeypatch):
     captured = {}
     client = FmpClient(api_key="test-token")
