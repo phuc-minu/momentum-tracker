@@ -1,0 +1,133 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-tech-momentum-ai
+  CONTAINER_APP: momentumai-api
+  REFRESH_JOB: momentumai-db-refresh
+  IMAGE_NAME: tech-momentum-ai
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r app/requirements.txt
+
+      - name: Run tests
+        # live_site tests need a separately running site, so they are excluded here
+        # just as the issue agent excludes them.
+        run: python -m pytest -m "not live_site" -p no:cacheprovider
+
+  deploy:
+    name: Deploy to Azure
+    needs: test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ steps.health.outputs.url }}
+    # One deploy at a time; a newer push replaces any deploy still waiting to start.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PYTHONIOENCODING: utf-8
+      AZURE_CORE_NO_COLOR: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image in ACR
+        id: build
+        run: |
+          acr_names=$(az acr list -g "$RESOURCE_GROUP" --query "[].name" -o tsv)
+          if [[ $(echo "$acr_names" | grep -c .) -ne 1 ]]; then
+            echo "::error::Expected exactly one ACR in $RESOURCE_GROUP, found: $acr_names"
+            exit 1
+          fi
+          acr="$acr_names"
+          # The agent- prefix keeps the issue agent able to read which commit is deployed.
+          tag="agent-${GITHUB_SHA}"
+          az acr build --registry "$acr" --image "$IMAGE_NAME:$tag" --no-logs ./app
+          login_server=$(az acr show -n "$acr" --query loginServer -o tsv)
+          echo "image=$login_server/$IMAGE_NAME:$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Update container app
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          az containerapp update -n "$CONTAINER_APP" -g "$RESOURCE_GROUP" --image "$IMAGE" -o none
+
+          for _ in $(seq 1 60); do
+            latest=$(az containerapp show -n "$CONTAINER_APP" -g "$RESOURCE_GROUP" --query properties.latestRevisionName -o tsv)
+            ready=$(az containerapp show -n "$CONTAINER_APP" -g "$RESOURCE_GROUP" --query properties.latestReadyRevisionName -o tsv)
+            if [[ -n "$latest" && "$latest" == "$ready" ]]; then
+              read -r image state < <(az containerapp revision show -n "$CONTAINER_APP" -g "$RESOURCE_GROUP" \
+                --revision "$ready" --query "[properties.template.containers[0].image, properties.runningState]" -o tsv | paste -sd ' ')
+              if [[ "$image" == "$IMAGE" && "$state" == "Running" ]]; then
+                echo "Revision $ready is running $IMAGE"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::Latest ready revision did not become Running with image $IMAGE"
+          exit 1
+
+      - name: Health check
+        id: health
+        run: |
+          fqdn=$(az containerapp show -n "$CONTAINER_APP" -g "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          status=$(curl -fsS --retry 5 --retry-delay 5 --max-time 30 "https://$fqdn/health" | python -c 'import json,sys; print(json.load(sys.stdin).get("status"))')
+          if [[ "$status" != "ok" ]]; then
+            echo "::error::Health check returned status '$status'"
+            exit 1
+          fi
+          echo "url=https://$fqdn" >> "$GITHUB_OUTPUT"
+
+      - name: Update db-refresh job image
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          jobs=$(az containerapp job list -g "$RESOURCE_GROUP" --query "[?name=='$REFRESH_JOB'].name" -o tsv)
+          if [[ -z "$jobs" ]]; then
+            echo "$REFRESH_JOB not found; skipping image update."
+            exit 0
+          fi
+          az containerapp job update -n "$REFRESH_JOB" -g "$RESOURCE_GROUP" --container-name db-refresh --image "$IMAGE" -o none
+          job_image=$(az containerapp job show -n "$REFRESH_JOB" -g "$RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='db-refresh'].image | [0]" -o tsv)
+          if [[ "$job_image" != "$IMAGE" ]]; then
+            echo "::error::$REFRESH_JOB is configured with unexpected image '$job_image'"
+            exit 1
+          fi

@@ -173,6 +173,31 @@ cd app
 python -m pytest
 ```
 
+## CI/CD (GitHub Actions)
+
+`.github/workflows/ci-cd.yml` runs `python -m pytest -m "not live_site"` on Python 3.12 for every pull request to `main` and every push to `main`. After tests pass on `main`, the `deploy` job builds the `app/` image in ACR as `tech-momentum-ai:agent-<commit sha>`, updates `momentumai-api`, waits for the new revision to be running, checks `/health`, and updates the `momentumai-db-refresh` job image if the job exists. It does not provision infrastructure or write Key Vault secrets; use `deploy.sh` / `deploy.ps1` for that. Deploys can also be started from the Actions tab with **Run workflow**.
+
+The deploy job signs in to Azure with OpenID Connect, so no Azure password is stored in GitHub. One-time setup:
+
+```bash
+app_id=$(az ad app create --display-name momentum-tracker-github --query appId -o tsv)
+az ad sp create --id "$app_id"
+az ad app federated-credential create --id "$app_id" --parameters '{
+  "name": "github-production",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:phuc-minu/momentum-tracker:environment:production",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
+az role assignment create --assignee "$app_id" --role Contributor \
+  --scope "$(az group show -n rg-tech-momentum-ai --query id -o tsv)"
+
+gh variable set AZURE_CLIENT_ID --body "$app_id"
+gh variable set AZURE_TENANT_ID --body "$(az account show --query tenantId -o tsv)"
+gh variable set AZURE_SUBSCRIPTION_ID --body "$(az account show --query id -o tsv)"
+```
+
+The `production` GitHub environment is created on the first deploy; add required reviewers to it in the repository settings if deploys should wait for approval. If GitHub Actions deploys, turn off the issue agent's own deployment step so each merge is not deployed twice.
+
 ## Local GitHub issue agent (Windows PowerShell 7)
 
 The agent in `scripts/issue-agent.ps1` polls open issues labeled `ai-ready` when explicitly run with `-Repository phuc-minu/momentum-tracker` and `-RepoRoot <repo-path>` after `gh auth login`; use `-Once` for a single poll. Issue text is untrusted input, and a trusted collaborator must apply the label; edits made after labeling require the label to be removed and applied again. Claude is restricted to read-only tools for planning and post-Codex review, and project/local Claude settings and MCP servers are excluded from those host-side runs. Codex runs in a disposable Linux Docker container with only the per-issue worktree mounted; GitHub, Azure, and host-profile credentials are not mounted. The worker requires a dedicated AI-only API key in the current user's `ISSUE_AGENT_CODEX_API_KEY` environment variable; Codex's shell environment excludes the key and its workspace-write command sandbox has network access disabled. Tests run in separate disposable Linux Docker containers with networking disabled and source mounted read-only; the `live_site` integration test is excluded. State updates are atomic, with ignored local scratch files and redacted logs; native commands have bounded timeouts, and timed-out worker/test containers are removed. Failed phases retry with backoff and report a final failure once. Re-applying `ai-ready` after a final issue-processing failure starts a fresh worktree and branch. Terminal deployment failures require the explicit `-Mode retry-deployment -IssueNumber <n>` command. The workflow pauses for human review after creating and pushing an explanatory PR. This source change does not install or register the agent.
