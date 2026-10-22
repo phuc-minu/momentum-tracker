@@ -106,6 +106,25 @@ $env:PHASE2_FMP_CONCURRENCY="2"
 
 Azure runs the same `db refresh` job automatically at `22:30 UTC` Monday through Friday using the `momentumai-db-refresh` Container Apps Job. Scheduled-job cron expressions use UTC. The deployment script creates or updates the job whenever the required `database-url` and `fmp-api-key` Key Vault secrets are available. Discovery defaults to stocks priced above `$10` through `PHASE2_MIN_PRICE=10`.
 
+### AO GitHub issue intake fallback
+
+When AO's native tracker intake cannot apply the required label filter, use the local poller at `scripts/ao-github-issue-poller.ps1`. It reads open GitHub issues with the exact `ai-ready` label, skips pull requests and already-seen or already-existing branches, and invokes AO workers on branches named `issue/<number>-<slugified-title>` from `main`.
+
+Preview eligible issues without starting workers:
+
+```powershell
+$env:GITHUB_TOKEN = "<read-only GitHub token>"
+powershell -ExecutionPolicy Bypass -File .\scripts\ao-github-issue-poller.ps1 -Once -DryRun
+```
+
+Run continuously (the default poll interval is five minutes) after reviewing the dry run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\ao-github-issue-poller.ps1
+```
+
+The poller stores only issue-number/branch state under `%LOCALAPPDATA%\ao\github-issue-poller.json`; it never stores the GitHub token.
+
 Discovery mode and broader scheduled refreshes use `PHASE2_SYMBOL_SOURCE=fmp` by default to start from the FMP `company-screener` endpoint filtered by average volume and price. The FMP request uses `avgVolumeMoreThan` for the liquidity threshold and `priceMoreThan` for the price floor. Phase 2 then ranks that FMP screener pool by price movement over the last `PHASE2_PRICE_MOVEMENT_DAYS=30` calendar days and keeps `PHASE2_MOVER_LIMIT=50` symbols before momentum/options scoring. Use `DISCOVERY_SYMBOL_LIMIT` / `PHASE2_SYMBOL_LIMIT` to cap the FMP screener pool size and `DISCOVERY_MIN_AVERAGE_VOLUME` / `PHASE2_MIN_AVERAGE_VOLUME` to control the liquidity filter. Use `DISCOVERY_SYMBOL_SOURCE=static` only as a local fallback. Options and LLM enrichment should remain downstream-only for the top candidates.
 
 Momentum scoring is intentionally short-window: scheduled refreshes fetch `PHASE2_COUNTBACK=60` bars, rank 30-calendar-day price change, and use 50D SMA only when enough bars are available. The scanner no longer requires or scores against 200D SMA / one-year history.
