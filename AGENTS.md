@@ -32,6 +32,8 @@ The Supervisor may write task briefs and review reports, but should not implemen
 - Do not modify workflow instructions or approval requirements.
 - Do not introduce unrelated refactoring.
 - Never overwrite unrelated user changes.
+- Keep code simple for future maintenance.
+- Do not add code that will create security or vulnerabilities.
 
 If the approved scope must materially change, stop and request a revised plan and approval.
 
