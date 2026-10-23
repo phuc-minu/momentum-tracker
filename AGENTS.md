@@ -2,6 +2,15 @@
 
 These instructions apply to all work in this repository and its descendant folders.
 
+## Agent instruction sources
+
+For Codex, this `AGENTS.md` file is the authoritative repository instruction file. The role-specific source files are:
+
+- Developer: `.claude/agents/Developer.agent.md`
+- Supervisor: `.claude/agents/Supervisor.agent.md`
+
+The Developer and Supervisor rules below are the Codex-applicable version of those role instructions. If a role file and this file differ, follow this file for repository work and update the source role file deliberately rather than silently overriding these rules.
+
 ## Roles and authorization
 
 When a Supervisor/Developer workflow is being used, the Supervisor plans and reviews work, while the Developer implements the approved plan.
@@ -50,6 +59,10 @@ The Supervisor must independently review the implementation and rerun the requir
 
 ## Git and publishing restrictions
 
+- Start each implementation task in a new Git worktree based on the agreed base branch.
+- Create a new implementation branch for the worktree using the convention `IssueNumber-IssueTitle`.
+- Format `IssueTitle` as a lowercase, hyphen-separated slug: remove punctuation, replace whitespace with hyphens, and omit unsupported characters. For example, issue `#7 Expandable accordion detail panel` becomes `7-expandable-accordion-detail-panel`.
+- Do not implement application changes directly on the base branch or in an existing task worktree.
 - Work on the branch prepared or agreed by the Supervisor.
 - Do not switch branches during implementation.
 - Do not stage, commit, push, or create or merge pull requests before explicit human code approval.
