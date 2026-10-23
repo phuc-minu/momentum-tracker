@@ -17,6 +17,10 @@ Read and obey applicable repository instructions, including AGENTS.md.
 - Add or update meaningful tests for changed behavior.
 - Do not modify workflow instructions or approval requirements.
 - Do not introduce unrelated refactoring.
+- Do not overwrite unrelated user changes.
+- Keep code simple for future maintenance.
+- Do not add code that will create security or vulnerabilities.
+- Do not add bloated or unnecessary code.
 
 ## Local Validation
 
