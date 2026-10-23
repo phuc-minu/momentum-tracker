@@ -521,7 +521,7 @@ table {
 }
 
 .discover-table {
-  min-width: 1480px;
+  min-width: 1500px;
   table-layout: fixed;
   font-size: 12px;
 }
@@ -544,19 +544,25 @@ table {
 }
 
 .discover-table .col-rank {
-  width: 54px;
+  width: 76px;
 }
 
 .discover-table .col-toggle { width: 44px; }
 
 .overextended-table .col-rank {
-  width: 54px;
+  width: 64px;
 }
 
-.discover-table .col-symbol,
-.discover-table .col-price,
+.discover-table .col-symbol {
+  width: 92px;
+}
+
+.discover-table .col-price {
+  width: 80px;
+}
+
 .discover-table .col-score {
-  width: 76px;
+  width: 84px;
 }
 
 .overextended-table .col-symbol,
@@ -589,13 +595,19 @@ table {
 }
 
 .discover-table .col-sector {
-  width: 150px;
+  width: 168px;
 }
 
-.discover-table .col-growth,
-.discover-table .col-rsi,
-.discover-table .col-volume {
+.discover-table .col-growth {
+  width: 128px;
+}
+
+.discover-table .col-rsi {
   width: 92px;
+}
+
+.discover-table .col-volume {
+  width: 96px;
 }
 
 .discover-table .col-signal {
@@ -657,6 +669,13 @@ td {
 .overextended-table th,
 .biotech-table th {
   line-height: 1.2;
+}
+
+.discover-table th,
+.overextended-table th {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 .sort-button {
@@ -970,5 +989,5 @@ tbody tr:hover {
 }
 
 .discover-table .col-price-added {
-  width: 128px;
+  width: 148px;
 }

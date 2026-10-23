@@ -148,3 +148,83 @@ test("Sector / Exchange sorts displayed labels and preserves score ties", async 
   await sort.click();
   await expect(symbols).toHaveText(["HIGH", "LOW", "NAS", "NYSE", "TECH"]);
 });
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 900 }]) {
+  test(`Discover and Overextended headers stay single-line at ${viewport.width}px`, async ({ page }) => {
+    await page.route("**/auth/status", route => route.fulfill({ json: { authenticated: true } }));
+    await page.route("**/health", route => route.fulfill({ json: { status: "ok", fmp_configured: false } }));
+    await page.route("**/phase2/**", route => route.fulfill({ json: { results: [] } }));
+    const results = [
+      { symbol: "ZZZ", score: 95, last_close: 20, factors: { return_1m: 0.12, return_2w: 0.05, rsi_14: 61 } },
+      { symbol: "AAA", score: 80, last_close: 10, factors: { return_1m: 0.08, return_2w: 0.04, rsi_14: 55 } },
+      { symbol: "MMM", score: 70, last_close: 8, factors: { return_1m: 0.06 } },
+    ];
+    await page.route("**/phase2/candidates?*", route => route.fulfill({ json: { results, growth_min: 0, period_days: 30, limit: 200 } }));
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+
+    await expect(page.locator("#growthColumnLabel")).toHaveText("30D Growth");
+    const assertHeaders = async selector => {
+      const headers = page.locator(`${selector} thead th:not(.col-toggle-header)`);
+      await expect(headers).not.toHaveCount(0);
+      for (let i = 0; i < await headers.count(); i += 1) {
+        const header = headers.nth(i);
+        const metrics = await header.evaluate(th => {
+          const walker = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
+          const textNodes = [];
+          while (walker.nextNode()) textNodes.push(walker.currentNode);
+          const textRects = textNodes.flatMap(node => {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            return [...range.getClientRects()];
+          });
+          const button = th.querySelector(".sort-button");
+          const style = getComputedStyle(th);
+          return {
+            textTops: textRects.map(rect => rect.top),
+            scrollWidth: th.scrollWidth,
+            clientWidth: th.clientWidth,
+            buttonScrollWidth: button?.scrollWidth ?? 0,
+            contentWidth: th.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+            whiteSpace: style.whiteSpace,
+          };
+        });
+        expect(metrics.whiteSpace).toBe("nowrap");
+        expect(metrics.textTops.every(top => Math.abs(top - metrics.textTops[0]) <= 0.5)).toBe(true);
+        expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+        expect(metrics.buttonScrollWidth).toBeLessThanOrEqual(metrics.contentWidth + 1);
+      }
+    };
+    await assertHeaders(".discover-table");
+
+    const symbolSort = page.getByRole("button", { name: "Symbol", exact: true });
+    await symbolSort.click();
+    await expect(page.locator("#discoverBody .symbol-link")).toHaveText(["AAA", "MMM", "ZZZ"]);
+    const rankSort = page.getByRole("button", { name: "Rank", exact: true });
+    await rankSort.click();
+    await expect(page.locator("#discoverBody .symbol-link")).toHaveText(["ZZZ", "AAA", "MMM"]);
+    await expect(rankSort.locator("..")).toHaveAttribute("aria-sort", "ascending");
+    await expect(rankSort.locator(".sort-indicator")).toHaveText("↑");
+    await rankSort.click();
+    await expect(page.locator("#discoverBody .symbol-link")).toHaveText(["MMM", "AAA", "ZZZ"]);
+    await expect(rankSort.locator("..")).toHaveAttribute("aria-sort", "descending");
+    await expect(rankSort.locator(".sort-indicator")).toHaveText("↓");
+    await page.getByRole("button", { name: "Score", exact: true }).click();
+    await expect(rankSort.locator(".sort-indicator")).toHaveText("↕");
+    await expect(rankSort.locator("..")).not.toHaveAttribute("aria-sort", /.+/);
+
+    const rankHeader = page.locator(".discover-table thead th:nth-child(2)");
+    const rankCell = page.locator("#discoverBody tr").first().locator("td").nth(1);
+    const toggleHeader = page.locator(".discover-table thead th:nth-child(1)");
+    const toggleCell = page.locator("#discoverBody tr").first().locator("td").first();
+    for (const [header, cell] of [[rankHeader, rankCell], [toggleHeader, toggleCell]]) {
+      const edges = await Promise.all([header, cell].map(locator => locator.boundingBox()));
+      expect(Math.abs(edges[0].x - edges[1].x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(edges[0].width - edges[1].width)).toBeLessThanOrEqual(1);
+    }
+
+    await page.locator('button.tab-button[data-tab="overextendedPanel"]').click();
+    await assertHeaders(".overextended-table");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+}
